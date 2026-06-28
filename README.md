@@ -67,8 +67,6 @@ The scripts assume both nodes use the same repository path.
 | `start-deepseek-v4-flash-dspark.sh` | Start the DSpark TP=2 server |
 | `stop-deepseek-v4-flash-dspark.sh` | Stop the DSpark TP=2 server |
 | `docker-compose.yml` | Legacy/plain DeepSeek V4 Flash MTP fallback |
-| `start-deepseek-v4-flash.sh` | Legacy/plain MTP fallback start script |
-| `stop-deepseek-v4-flash.sh` | Legacy/plain MTP fallback stop script |
 
 ## Quick Start
 
