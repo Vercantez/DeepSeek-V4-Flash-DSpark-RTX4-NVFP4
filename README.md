@@ -157,38 +157,6 @@ You do not need to re-download the model unless the Hugging Face cache is
 missing. On a fresh machine, run `./prepare-dspark-model-cache.sh` before
 starting.
 
-## Original 1M Checkpoint
-
-The original checkpoint was validated on 2x DGX Spark, one GPU per node, TP=2,
-single stream:
-
-- `max_model_len=1048576`
-- `kv_cache_dtype=nvfp4_ds_mla`
-- reported KV pool: `2,044,166 tokens`
-- reported max concurrency for 1M requests: `1.95x`
-- single-stream decode stayed above `50 tok/s`
-
-| Case | server tok/s | TTFC | acceptance | accepted/draft |
-| --- | ---: | ---: | ---: | ---: |
-| p256/g64 | 54.46 | 0.506s | 0.667 | 3.33 |
-| p256/g256 | 65.38 | 0.324s | 0.718 | 3.59 |
-| p512/g64 | 56.26 | 2.738s | 0.625 | 3.13 |
-| p512/g256 | 54.41 | 0.422s | 0.550 | 2.75 |
-| p512/g256 warmup1 | 56.73 | 0.417s | 0.585 | 2.92 |
-
-Boot logs reported:
-
-```text
-GPU KV cache size: 2,044,166 tokens
-Maximum concurrency for 1,048,576 tokens per request: 1.95x
-```
-
-The API reported:
-
-```json
-{"max_model_len":1048576}
-```
-
 ## Important Caveat
 
 This is the **Stage C padded NVFP4** path. It keeps DeepSeek V4's known-good
