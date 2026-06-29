@@ -53,31 +53,29 @@ compose_base() {
     docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "${@:3}"
 }
 
-LOG_PIDS=()
-
-start_startup_logs() {
-  echo "Following DSpark container logs while the API starts..."
-  compose_base 0 "" logs --tail=100 --follow vllm-dspark &
-  LOG_PIDS+=("$!")
-  ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=100 --follow vllm-dspark" &
-  LOG_PIDS+=("$!")
+log_since() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
-stop_startup_logs() {
-  if [ "${#LOG_PIDS[@]}" -eq 0 ]; then
-    return
-  fi
+print_startup_logs() {
+  local since="$1"
 
-  for pid in "${LOG_PIDS[@]}"; do
-    kill "$pid" 2>/dev/null || true
-  done
-  for pid in "${LOG_PIDS[@]}"; do
-    wait "$pid" 2>/dev/null || true
-  done
-  LOG_PIDS=()
+  compose_base 0 "" logs --since "$since" vllm-dspark || true
+  ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --since '$since' vllm-dspark" || true
 }
 
-trap stop_startup_logs EXIT
+wait_with_startup_logs() {
+  local since
+  since="$(log_since)"
+
+  sleep "$WAIT_SECONDS"
+  print_startup_logs "$since"
+}
+
+print_initial_startup_logs() {
+  compose_base 0 "" logs --tail=100 vllm-dspark || true
+  ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=100 vllm-dspark" || true
+}
 
 need_cmd docker
 need_cmd ssh
@@ -126,24 +124,15 @@ echo "Starting DSpark head..."
 compose_base 0 "" up -d
 
 echo "Waiting for DSpark vLLM API..."
-start_startup_logs
+print_initial_startup_logs
 for _ in $(seq 1 "$WAIT_ATTEMPTS"); do
   if curl -fsS --max-time 5 "$API_URL" >/dev/null 2>&1; then
-    stop_startup_logs
-    echo "DeepSeek V4 Flash DSpark is running: $API_URL"
-    compose_base 0 "" ps
-    ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml ps"
-    echo "Running minimal OpenAI-compatible chat request..."
-    curl -fsS --max-time 60 "$CHAT_URL" \
-      -H "Content-Type: application/json" \
-      -d '{"model":"'"${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"'","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":8,"temperature":0.0}' >/dev/null
-    echo "Minimal chat request succeeded."
+    echo "vLLM is up and running."
     exit 0
   fi
-  sleep "$WAIT_SECONDS"
+  wait_with_startup_logs
 done
 
-stop_startup_logs
 echo "Timed out waiting for DSpark API. Recent head logs:" >&2
 compose_base 0 "" logs --tail=120 vllm-dspark >&2 || true
 echo "Recent worker logs:" >&2
