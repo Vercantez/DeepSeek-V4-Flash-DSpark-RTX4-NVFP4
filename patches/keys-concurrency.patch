@@ -255,7 +255,7 @@ index 4d29472..5435275 100644
          return draft_ids, logits, confidence
 
 diff --git a/recipe/overlay/vllm/v1/spec_decode/dspark_proposer.py b/recipe/overlay/vllm/v1/spec_decode/dspark_proposer.py
-index 21015f9..5f7878d 100644
+index 21015f9..c47becf 100644
 --- a/recipe/overlay/vllm/v1/spec_decode/dspark_proposer.py
 +++ b/recipe/overlay/vllm/v1/spec_decode/dspark_proposer.py
 @@ -76,6 +76,19 @@ class DSparkProposer(SpecDecodeBaseProposer):
@@ -353,7 +353,7 @@ index 21015f9..5f7878d 100644
      ) -> torch.Tensor:
          del (
              target_token_ids,
-@@ -736,14 +785,49 @@ class DSparkProposer(SpecDecodeBaseProposer):
+@@ -736,14 +785,52 @@ class DSparkProposer(SpecDecodeBaseProposer):
          total_started = time.perf_counter()
          batch_size = self._batch_size(next_token_ids)
 
@@ -376,13 +376,20 @@ index 21015f9..5f7878d 100644
          def prepare_context():
              nonlocal target_hidden_states, target_positions
              rejected_for_gpu_mask = None
+-            if (
+-                getattr(self, "_gpu_rejected_context_mask", False)
+-                and num_rejected_tokens_gpu is not None
+-            ):
 +            prefill_query_start_loc: list[int] | None = None
 +            ragged = False
 +            query_starts: list[int] | None = None
-             if (
-                 getattr(self, "_gpu_rejected_context_mask", False)
-                 and num_rejected_tokens_gpu is not None
-             ):
++            if getattr(self, "_gpu_rejected_context_mask", False):
++                # NOTE: enter this branch whenever GPU-mask mode is on, even if
++                # num_rejected_tokens_gpu is None (e.g. prefill-heavy steps with
++                # no rejection). Raggedness depends on query_start_loc segment
++                # lengths, NOT on rejection — gating ragged detection on
++                # rejection let ragged no-rejection steps fall through to the
++                # rectangular _view_by_request and crash. rejected may be None.
                  rejected_for_gpu_mask = num_rejected_tokens_gpu
 +                # Detect non-uniform per-request query rows (mixed prefill +
 +                # decode under chunked prefill). Only then do we need the ragged
@@ -403,7 +410,7 @@ index 21015f9..5f7878d 100644
              else:
                  target_hidden_states, target_positions = (
                      self._trim_rejected_target_context(
-@@ -753,6 +837,49 @@ class DSparkProposer(SpecDecodeBaseProposer):
+@@ -753,6 +840,54 @@ class DSparkProposer(SpecDecodeBaseProposer):
                          num_rejected_tokens_gpu,
                      )
                  )
@@ -429,9 +436,14 @@ index 21015f9..5f7878d 100644
 +                    device=device,
 +                    dtype=torch.long,
 +                )
-+                rejected = rejected_for_gpu_mask.to(
-+                    device=device, dtype=torch.long, non_blocking=True
-+                ).view(batch_size)
++                if rejected_for_gpu_mask is not None:
++                    rejected = rejected_for_gpu_mask.to(
++                        device=device, dtype=torch.long, non_blocking=True
++                    ).view(batch_size)
++                else:
++                    rejected = torch.zeros(
++                        batch_size, device=device, dtype=torch.long
++                    )
 +                last_offsets = (lengths - rejected - 1).clamp(min=0)
 +                last_offsets = torch.minimum(last_offsets, lengths - 1)
 +                anchor_idx = starts + last_offsets
@@ -453,7 +465,7 @@ index 21015f9..5f7878d 100644
              hidden_by_req = self._view_by_request(target_hidden_states, batch_size)
              positions_by_req = self._positions_by_request(target_positions, batch_size)
 
-@@ -780,24 +907,36 @@ class DSparkProposer(SpecDecodeBaseProposer):
+@@ -780,24 +915,36 @@ class DSparkProposer(SpecDecodeBaseProposer):
              else:
                  last_hidden = hidden_by_req[:, -1].contiguous()
                  last_positions = positions_by_req[:, -1].contiguous()
@@ -496,7 +508,7 @@ index 21015f9..5f7878d 100644
              ),
          )
          if not self._prefilled:
-@@ -816,6 +955,7 @@ class DSparkProposer(SpecDecodeBaseProposer):
+@@ -816,6 +963,7 @@ class DSparkProposer(SpecDecodeBaseProposer):
                  hidden_states=last_hidden,
                  positions=last_positions,
                  padded_batch_size=padded_batch_size,

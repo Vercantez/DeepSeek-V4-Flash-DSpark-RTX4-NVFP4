@@ -807,10 +807,13 @@ class DSparkProposer(SpecDecodeBaseProposer):
             prefill_query_start_loc: list[int] | None = None
             ragged = False
             query_starts: list[int] | None = None
-            if (
-                getattr(self, "_gpu_rejected_context_mask", False)
-                and num_rejected_tokens_gpu is not None
-            ):
+            if getattr(self, "_gpu_rejected_context_mask", False):
+                # NOTE: enter this branch whenever GPU-mask mode is on, even if
+                # num_rejected_tokens_gpu is None (e.g. prefill-heavy steps with
+                # no rejection). Raggedness depends on query_start_loc segment
+                # lengths, NOT on rejection — gating ragged detection on
+                # rejection let ragged no-rejection steps fall through to the
+                # rectangular _view_by_request and crash. rejected may be None.
                 rejected_for_gpu_mask = num_rejected_tokens_gpu
                 # Detect non-uniform per-request query rows (mixed prefill +
                 # decode under chunked prefill). Only then do we need the ragged
@@ -859,9 +862,14 @@ class DSparkProposer(SpecDecodeBaseProposer):
                     device=device,
                     dtype=torch.long,
                 )
-                rejected = rejected_for_gpu_mask.to(
-                    device=device, dtype=torch.long, non_blocking=True
-                ).view(batch_size)
+                if rejected_for_gpu_mask is not None:
+                    rejected = rejected_for_gpu_mask.to(
+                        device=device, dtype=torch.long, non_blocking=True
+                    ).view(batch_size)
+                else:
+                    rejected = torch.zeros(
+                        batch_size, device=device, dtype=torch.long
+                    )
                 last_offsets = (lengths - rejected - 1).clamp(min=0)
                 last_offsets = torch.minimum(last_offsets, lengths - 1)
                 anchor_idx = starts + last_offsets

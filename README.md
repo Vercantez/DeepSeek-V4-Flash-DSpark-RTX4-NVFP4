@@ -26,6 +26,10 @@ The current local run profile is configured for:
 - `gpu_memory_utilization=0.84`
 - API bind address `0.0.0.0:8888`
 
+This repository also includes the original validated 2026-06-29 1M checkpoint
+evidence below. It also includes Keys' Patch 2B concurrency and quality
+certification notes in [`RESULTS.md`](RESULTS.md) and [`docs/PATCHES.md`](docs/PATCHES.md).
+
 ## Current Profile
 
 The active local `.env.dspark` profile is a 1M-context, 6-sequence
@@ -91,6 +95,7 @@ The patch fixes the DSpark behavior that matters for `MAX_NUM_SEQS > 1`:
 
 - request-stable DSpark main-KV slots
 - ragged `query_start_loc` handling for mixed prefill/decode scheduler steps
+- Patch 2B ragged detection independent of whether the step has rejected tokens
 - passing request ids into the DSpark proposer so persistent draft KV follows
   request identity
 
@@ -136,10 +141,20 @@ or use the 500k/4 fallback if your workload pushes the KV pool too hard.
 After starting the server, you can run the included concurrency probes:
 
 ```bash
-python3 benchmarks/keys-concurrency/bench_concurrent.py http://127.0.0.1:8888 1,4,8,16
-python3 benchmarks/keys-concurrency/staggered_bench.py http://127.0.0.1:8888 16 0.4
-python3 benchmarks/keys-concurrency/correctness_test.py http://127.0.0.1:8888
+python3 benchmarks/bench_concurrent.py http://127.0.0.1:8888 1,4,8,16
+python3 benchmarks/staggered_bench.py http://127.0.0.1:8888 16 0.4
+python3 benchmarks/correctness_test.py http://127.0.0.1:8888
 ```
+
+Patch 2B also adds an optional GSM8K quality-certification probe:
+
+```bash
+GSM8K_DATA=/path/to/gsm8k_test.jsonl python3 benchmarks/gsm8k_eval.py http://127.0.0.1:8888 200 8 /tmp/gsm8k_concurrent.json
+```
+
+Run it once with `CONC=1` and once with `CONC=8`, then compare accuracy and
+per-question predictions. See [`RESULTS.md`](RESULTS.md) for the upstream
+quality-neutral reference result.
 
 If `VLLM_USE_B12X_WO_PROJECTION=1` is unstable on your runtime, set it back to
 `0` and retest. That is slower in some concurrency cases but usually safer for
@@ -189,7 +204,10 @@ reproducible recipe.
 | `logs-deepseek-v4-flash-dspark.sh` | prints head and worker DSpark logs |
 | `smoke-deepseek-v4-flash-dspark.sh` | runs a configurable concurrent API smoke test |
 | `PLANS.md` | script-hardening scope and validation notes |
-| `patches/keys-concurrency.patch` | vendored Keys DSpark concurrency patch |
+| `patches/keys-concurrency.patch` | vendored Keys DSpark concurrency patch, including Patch 2B |
+| `benchmarks/` | Keys concurrency and quality-certification benchmark scripts |
+| `docs/` | upstream Patch 1, Patch 2, and Patch 2B reference notes |
+| `RESULTS.md` | upstream concurrency, correctness, and GSM8K quality-certification results |
 | `CREDITS.md` | attribution and license notes for upstream work |
 
 ## Quick Start
@@ -210,7 +228,7 @@ NCCL_IB_HCA=rocep1s0f1
 NCCL_SOCKET_IFNAME=enp1s0f1np1
 NCCL_IB_GID_INDEX=0
 HF_CACHE=/home/zurih/.cache/huggingface
-MAX_MODEL_LEN=500000
+MAX_MODEL_LEN=1048576
 MAX_NUM_SEQS=6
 ```
 
@@ -311,8 +329,8 @@ Core vLLM flags for the current local profile:
 - `--nnodes 2`
 - `--kv-cache-dtype nvfp4_ds_mla`
 - `--block-size 256`
-- `--max-model-len 500000`
-- `--max-num-seqs 12`
+- `--max-model-len 1048576`
+- `--max-num-seqs 6`
 - `--max-num-batched-tokens 8192`
 - `--gpu-memory-utilization 0.84`
 - `--speculative-config '{"method":"dspark","num_speculative_tokens":5}'`
@@ -350,7 +368,7 @@ curl -fsS http://127.0.0.1:8888/v1/models
 Confirm the returned model entry reports:
 
 ```json
-"max_model_len": 500000
+"max_model_len": 1048576
 ```
 
 Check logs:
