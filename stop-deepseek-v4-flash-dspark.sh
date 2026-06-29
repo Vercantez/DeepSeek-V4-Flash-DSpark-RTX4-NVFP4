@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env.dspark}"
 COMPOSE_FILE="${COMPOSE_FILE:-$SCRIPT_DIR/docker-compose.dspark.yml}"
 PROJECT_NAME="${PROJECT_NAME:-deepseek-v4-flash}"
+LEGACY_PROJECT_NAME="${LEGACY_PROJECT_NAME:-$(basename "$SCRIPT_DIR" | tr '[:upper:]' '[:lower:]')}"
 
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -18,27 +19,42 @@ fi
 cd "$SCRIPT_DIR"
 
 stop_dspark_local() {
+  local project
   if [ -f "$COMPOSE_FILE" ]; then
-    COMPOSE_DISABLE_ENV_FILE=1 docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down --remove-orphans || true
+    for project in "$PROJECT_NAME" "$LEGACY_PROJECT_NAME"; do
+      COMPOSE_DISABLE_ENV_FILE=1 docker compose -p "$project" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down --remove-orphans || true
+    done
   fi
+  for project in "$PROJECT_NAME" "$LEGACY_PROJECT_NAME"; do
+    docker ps -aq \
+      --filter "label=com.docker.compose.project=$project" \
+      --filter "label=com.docker.compose.service=vllm-dspark" | xargs -r docker rm -f
+  done
   docker ps -aq \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
-    --filter "label=com.docker.compose.service=vllm-dspark" | xargs -r docker rm -f
+    --filter "label=com.docker.compose.service=vllm-dspark" \
+    --filter "name=deepseek-v4-flash" | xargs -r docker rm -f
 }
 
 echo "Stopping DSpark head..."
 stop_dspark_local
 
 echo "Stopping DSpark worker on ${WORKER_HOST}..."
-ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && PROJECT_NAME='$PROJECT_NAME' bash -s" <<'REMOTE_STOP' || true
+ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && PROJECT_NAME='$PROJECT_NAME' LEGACY_PROJECT_NAME='$LEGACY_PROJECT_NAME' bash -s" <<'REMOTE_STOP' || true
 set -euo pipefail
 if [ -f docker-compose.dspark.yml ]; then
-  env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 \
-    docker compose -p "$PROJECT_NAME" --env-file .env.dspark -f docker-compose.dspark.yml down --remove-orphans || true
+  for project in "$PROJECT_NAME" "$LEGACY_PROJECT_NAME"; do
+    env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 \
+      docker compose -p "$project" --env-file .env.dspark -f docker-compose.dspark.yml down --remove-orphans || true
+  done
 fi
+for project in "$PROJECT_NAME" "$LEGACY_PROJECT_NAME"; do
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=vllm-dspark" | xargs -r docker rm -f
+done
 docker ps -aq \
-  --filter "label=com.docker.compose.project=$PROJECT_NAME" \
-  --filter "label=com.docker.compose.service=vllm-dspark" | xargs -r docker rm -f
+  --filter "label=com.docker.compose.service=vllm-dspark" \
+  --filter "name=deepseek-v4-flash" | xargs -r docker rm -f
 REMOTE_STOP
 
 echo "DeepSeek V4 Flash DSpark stopped."

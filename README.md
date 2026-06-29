@@ -1,329 +1,367 @@
-# DeepSeek V4 Flash DSpark - Dual DGX Spark
+# DeepSeek V4 Flash DSpark NVFP4 KV on 2x DGX Spark
 
-Deploy [DeepSeek-V4-Flash-DSpark](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark) across **two NVIDIA DGX Spark** nodes with vLLM, tensor parallelism, FP8 KV cache, InfiniBand/RoCE networking, and DSpark speculative decoding.
+Self-contained two-node DGX Spark recipe for serving `DeepSeek-V4-Flash-DSpark`
+with vLLM TP=2, DSpark speculative decoding, and the experimental
+`nvfp4_ds_mla` KV-cache path.
 
-This repository contains a working two-node launch path for the Rafael Caricio DSpark vLLM integration:
+This repo includes Keys' DSpark concurrency patch in the vLLM overlay. That
+patch makes DSpark's persistent draft KV follow request identity instead of
+condensed batch-row position, and adds ragged mixed prefill/decode handling for
+real independent sessions.
 
-- vLLM PR: <https://github.com/rafaelcaricio/vllm/pull/1>
-- Deployment/runbook PR: <https://github.com/rafaelcaricio/spark_vllm_docker/pull/1>
+The current local run profile is configured for:
 
-The validated DSpark profile is optimized for **single-stream decode throughput** on TP=2. It uses a 262k context window and `max_num_seqs=1`. The older plain DeepSeek V4 Flash MTP/1M-context compose path is preserved as a fallback.
+- `max_model_len=1048576`
+- `max_num_seqs=6`
+- `kv_cache_dtype=nvfp4_ds_mla`
+- `gpu_memory_utilization=0.85`
+- API bind address `127.0.0.1:8888`
 
-## Overview
+This repository also includes the original validated 2026-06-29 1M checkpoint
+evidence in [`benchmarks/20260629-dspark-nvfp4-1m-context-checkpoint.md`](benchmarks/20260629-dspark-nvfp4-1m-context-checkpoint.md).
+It also includes the Keys concurrency checkpoint in
+[`benchmarks/20260629-dspark-keys-concurrency-checkpoint.md`](benchmarks/20260629-dspark-keys-concurrency-checkpoint.md).
 
-The DSpark path uses:
+## Current Profile
 
-- **2 x DGX Spark** nodes, one GPU per node
-- **Tensor parallelism 2** across both nodes
-- **vLLM multiprocess distributed executor** (`--distributed-executor-backend mp`)
-- **DSpark speculative decoding** (`method=dspark`, 5 draft tokens)
-- **DeepSeek V4 FP8 KV cache** (`--kv-cache-dtype fp8`)
-- **B12X MoE kernels** and verifier output projection optimization
-- **Prefix caching**, FlashInfer autotune, DeepSeek V4 tool parser, and DeepSeek V4 reasoning parser
+The active local `.env.dspark` profile is a 1M-context, 6-sequence
+configuration for the same Stage C NVFP4 runtime:
 
-Validated runtime endpoint:
-
-```text
-http://127.0.0.1:8888/v1
+```env
+MAX_MODEL_LEN=1048576
+MAX_NUM_SEQS=6
+DSPARK_VLLM_IMAGE=vllm-dspark-runtime:dspark-nvfp4-stage-c
+VLLM_USE_B12X_WO_PROJECTION=0
+VLLM_HOST=127.0.0.1
 ```
 
-Served model name:
+The rendered vLLM command should include:
 
 ```text
-deepseek-v4-flash-dspark
+--kv-cache-dtype nvfp4_ds_mla
+--max-model-len 1048576
+--max-num-seqs 6
+--master-port 25000
 ```
 
-## Requirements
+The 6-sequence profile should be treated as an agent-serving target. It keeps a
+full 1M per-request ceiling while allowing six active sequences to share the KV
+pool. If it is unstable under your real workload, use the 500k/4 fallback below
+or reduce `MAX_NUM_SEQS` to `2`.
 
-### Hardware
+> **Important:** The current profile is meant for real deep-context operation:
+> up to **1M tokens per separate session** with `MAX_NUM_SEQS=6`. The KV cache
+> is a shared pool, so six sessions do not each reserve 1M tokens up front.
+> Normal agent sessions can run concurrently while retaining the 1M ceiling for
+> unusually long requests.
 
-| Component | Requirement |
-|-----------|-------------|
-| Nodes | 2 x NVIDIA DGX Spark / GB10 |
-| GPUs | 1 GPU per node |
-| Interconnect | InfiniBand/RoCE between nodes |
-| Storage | About 170 GB per node for `DeepSeek-V4-Flash-DSpark`, plus Docker images and caches |
+> **Reported 1M/6 test:** A live 6-way run on the same recipe line reported
+> `6/6` streams succeeded, about `181.7 tok/s` aggregate, no OOM, and no
+> request failures. Reproduce on your own nodes before treating those numbers as
+> a formal benchmark for your deployment.
 
-### Software
+The validated NVFP4 run reported about **2.04M tokens of GPU KV cache**. If you
+prefer a conservative 1M-context profile, set:
 
-- Docker with `docker compose`
-- NVIDIA Container Toolkit
-- Git
-- curl
-- Passwordless SSH from the head node to the worker node
-- Hugging Face access to `deepseek-ai/DeepSeek-V4-Flash-DSpark`
+```env
+MAX_MODEL_LEN=1048576
+MAX_NUM_SEQS=2
+```
 
-The scripts assume both nodes use the same repository path.
+For a balanced deep-context fallback, set:
+
+```env
+MAX_MODEL_LEN=500000
+MAX_NUM_SEQS=4
+```
+
+That trades the current 1M/6 profile for lower per-request context and more KV
+headroom per active session.
+
+## Keys Concurrency Patch
+
+The runtime overlay includes Keys' DSpark concurrency patch, vendored as
+[`patches/keys-concurrency.patch`](patches/keys-concurrency.patch).
+
+The patch fixes the DSpark behavior that matters for `MAX_NUM_SEQS > 1`:
+
+- request-stable DSpark main-KV slots
+- ragged `query_start_loc` handling for mixed prefill/decode scheduler steps
+- passing request ids into the DSpark proposer so persistent draft KV follows
+  request identity
+
+The included measured checkpoint for that patch used:
+
+```env
+MAX_MODEL_LEN=200000
+MAX_NUM_SEQS=16
+VLLM_USE_B12X_WO_PROJECTION=1
+```
+
+Measured aggregate decode reached `315.1 tok/s` for static C16 and `205.0 tok/s`
+for staggered C16. Those numbers are benchmark evidence for the 200k/16 Keys
+profile, not for the current 1M/6 local profile.
+
+## High-Concurrency Mode
+
+For many shorter independent sessions, users can switch from the deep-context
+profile to the Keys high-concurrency profile. Edit `.env.dspark`:
+
+```env
+MAX_MODEL_LEN=200000
+MAX_NUM_SEQS=16
+VLLM_USE_B12X_WO_PROJECTION=1
+```
+
+This enables up to **16 active sequences** while using a lower per-request
+context ceiling. It is the profile used by the included Keys concurrency
+benchmark.
+
+What changes:
+
+- `MAX_MODEL_LEN=200000` lowers the per-session context ceiling so more active
+  sessions can share the KV pool safely.
+- `MAX_NUM_SEQS=16` raises the scheduler cap to 16 concurrent active sequences.
+- `VLLM_USE_B12X_WO_PROJECTION=1` enables the B12X optimized output-projection
+  path used by the measured high-concurrency run.
+
+Use this mode when aggregate concurrency matters more than 500k/1M context per
+individual session. For deep-context agent work, keep the default 1M/6 profile
+or use the 500k/4 fallback if your workload pushes the KV pool too hard.
+
+After starting the server, you can run the included concurrency probes:
+
+```bash
+python3 benchmarks/keys-concurrency/bench_concurrent.py http://127.0.0.1:8888 1,4,8,16
+python3 benchmarks/keys-concurrency/staggered_bench.py http://127.0.0.1:8888 16 0.4
+python3 benchmarks/keys-concurrency/correctness_test.py http://127.0.0.1:8888
+```
+
+If `VLLM_USE_B12X_WO_PROJECTION=1` is unstable on your runtime, set it back to
+`0` and retest. That is slower in some concurrency cases but usually safer for
+long-context NVFP4 operation.
+
+## Original 1M Checkpoint
+
+The original checkpoint was validated on 2x DGX Spark, one GPU per node, TP=2,
+single stream:
+
+- `max_model_len=1048576`
+- `kv_cache_dtype=nvfp4_ds_mla`
+- reported KV pool: `2,044,166 tokens`
+- reported max concurrency for 1M requests: `1.95x`
+- single-stream decode stayed above `50 tok/s`
+
+| Case | server tok/s | TTFC | acceptance | accepted/draft |
+| --- | ---: | ---: | ---: | ---: |
+| p256/g64 | 54.46 | 0.506s | 0.667 | 3.33 |
+| p256/g256 | 65.38 | 0.324s | 0.718 | 3.59 |
+| p512/g64 | 56.26 | 2.738s | 0.625 | 3.13 |
+| p512/g256 | 54.41 | 0.422s | 0.550 | 2.75 |
+| p512/g256 warmup1 | 56.73 | 0.417s | 0.585 | 2.92 |
+
+Boot logs reported:
+
+```text
+GPU KV cache size: 2,044,166 tokens
+Maximum concurrency for 1,048,576 tokens per request: 1.95x
+```
+
+The API reported:
+
+```json
+{"max_model_len":1048576}
+```
+
+## Important Caveat
+
+This is the **Stage C padded NVFP4** path. It keeps DeepSeek V4's known-good
+584-byte sparse-MLA cache envelope while routing the runtime through
+`nvfp4_ds_mla`.
+
+It is **not** the unresolved true-layout 416-byte NVFP4 kernel fix. The
+true-layout experiments were useful for diagnosis but failed past roughly 411
+real prompt tokens, so they are intentionally not presented here as the
+reproducible recipe.
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `.env.dspark.example` | DSpark environment template |
-| `.env.dspark` | Local DSpark environment file created from the template and ignored by git |
-| `docker-compose.dspark.yml` | DSpark vLLM service |
-| `build-dspark-vllm-runtime.sh` | Fetch Rafael's vLLM PR and build `vllm-dspark-runtime:clean` on both nodes |
-| `prepare-dspark-model-cache.sh` | Download and verify DSpark model shards on both nodes |
-| `start-deepseek-v4-flash-dspark.sh` | Start the DSpark TP=2 server |
-| `stop-deepseek-v4-flash-dspark.sh` | Stop the DSpark TP=2 server |
-| `docker-compose.yml` | Legacy/plain DeepSeek V4 Flash MTP fallback |
+| path | purpose |
+| --- | --- |
+| `recipe/overlay/` | base DSpark vLLM overlay files |
+| `recipe/Dockerfile.dspark-runtime-overlay` | builds the base DSpark runtime overlay |
+| `recipe/nvfp4/Dockerfile.stage-a` | adds `nvfp4_ds_mla` dtype plumbing |
+| `recipe/nvfp4/Dockerfile.stage-b` | enables DeepSeek V4 `nvfp4_ds_mla` probe path |
+| `recipe/nvfp4/Dockerfile.stage-c` | switches DeepSeek V4 NVFP4 to the validated 584-byte padded envelope |
+| `docker-compose.dspark.yml` | two-node vLLM/DSpark service |
+| `.env.dspark.example` | sanitized cluster configuration template |
+| `.env.dspark` | local cluster configuration, ignored by git |
+| `build-dspark-vllm-runtime.sh` | builds the Stage C image locally and on the worker |
+| `prepare-dspark-model-cache.sh` | downloads/verifies the model cache |
+| `start-deepseek-v4-flash-dspark.sh` | preflight checks, worker-first launch, and smoke test |
+| `stop-deepseek-v4-flash-dspark.sh` | stops/removes head and worker DSpark services |
+| `PLANS.md` | script-hardening scope and validation notes |
+| `patches/keys-concurrency.patch` | vendored Keys DSpark concurrency patch |
+| `benchmarks/keys-concurrency/` | Keys concurrency benchmark scripts |
+| `benchmarks/` | measured 1M and Keys concurrency checkpoint evidence |
+| `CREDITS.md` | attribution and license notes for upstream work |
 
 ## Quick Start
 
-Run these commands from the **head node**.
-
-### 1. Configure DSpark Environment
+Run from the head node.
 
 ```bash
 cp .env.dspark.example .env.dspark
 ```
 
-Edit `.env.dspark` for your cluster:
+Edit `.env.dspark` for your cluster. For this local setup the key values are:
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `WORKER_HOST` | SSH hostname or IP for the worker | `spark2-cx7` |
-| `MASTER_ADDR` | Head-node RoCE/IP address used by torch distributed | `169.254.109.196` |
-| `MASTER_PORT` | Distributed init port | `25000` |
-| `HF_CACHE` | Host Hugging Face cache path | `/home/user/.cache/huggingface` |
-| `NCCL_IB_HCA` | RDMA HCA name | `rocep1s0f1` |
-| `NCCL_SOCKET_IFNAME` | Socket interface for NCCL/control traffic | `enp1s0f1np1` |
-| `NCCL_IB_GID_INDEX` | RoCE GID index | `0` |
-
-Useful discovery commands:
-
-```bash
-ibdev2netdev -v
-ip addr show
+```env
+WORKER_HOST=spark2-cx7
+MASTER_ADDR=169.254.109.196
+MASTER_PORT=25000
+NCCL_IB_HCA=rocep1s0f1
+NCCL_SOCKET_IFNAME=enp1s0f1np1
+NCCL_IB_GID_INDEX=0
+HF_CACHE=/home/zurih/.cache/huggingface
+MAX_MODEL_LEN=1048576
+MAX_NUM_SEQS=6
 ```
 
-### 2. Build the DSpark vLLM Runtime
+For high-concurrency serving, use the `200000 / 16` profile described in
+[High-Concurrency Mode](#high-concurrency-mode).
+
+For a balanced fallback, use:
+
+```env
+MAX_MODEL_LEN=500000
+MAX_NUM_SEQS=4
+```
+
+Build the base overlay and Stage C NVFP4 image:
 
 ```bash
 ./build-dspark-vllm-runtime.sh
 ```
 
-This script:
-
-1. Clones or updates Rafael's vLLM fork at `~/models/spark/vllm-dspark`.
-2. Checks out `codex/dspark-harness-integration`.
-3. Pulls `ghcr.io/bjk110/vllm-spark:unholy-fusion-prod-ready`.
-4. Builds the thin overlay image `vllm-dspark-runtime:clean`.
-5. Verifies DSpark imports inside the image.
-6. Repeats the same build and import verification on `WORKER_HOST`.
-
-The image is a source overlay, not a full vLLM CUDA rebuild.
-
-### 3. Download and Verify Model Weights
+Prepare the model cache:
 
 ```bash
 ./prepare-dspark-model-cache.sh
 ```
 
-This downloads `deepseek-ai/DeepSeek-V4-Flash-DSpark` into `HF_CACHE` on both nodes and verifies the safetensor shard set.
-
-Expected successful verification:
-
-```text
-safetensor_shards=48
-missing_shards=0
-```
-
-The script sets `HF_HUB_DISABLE_XET=1` by default because the Xet transfer path was observed to stall during large shard downloads on this setup.
-
-### 4. Start DSpark
+Start the service:
 
 ```bash
 ./start-deepseek-v4-flash-dspark.sh
 ```
 
-The script:
-
-1. Syncs `docker-compose.dspark.yml` and `.env.dspark` to the worker.
-2. Starts the worker with `NODE_RANK=1` and `HEADLESS=1`.
-3. Starts the head with `NODE_RANK=0`.
-4. Waits for `http://127.0.0.1:8888/v1/models`.
-5. Runs a minimal OpenAI-compatible chat request.
-
-### 5. Stop DSpark
+Stop the service:
 
 ```bash
 ./stop-deepseek-v4-flash-dspark.sh
 ```
 
-## API Usage
-
-### List Models
-
-```bash
-curl http://127.0.0.1:8888/v1/models
-```
-
-Expected model id:
+The API serves at:
 
 ```text
-deepseek-v4-flash-dspark
+http://127.0.0.1:8888/v1
 ```
 
-### Chat Completion
+By default the service binds to `127.0.0.1`. Set `VLLM_HOST=0.0.0.0` only
+when you intentionally want to expose the API beyond the head node.
+
+## Script Behavior
+
+The helper scripts are intentionally defensive:
+
+- `start-deepseek-v4-flash-dspark.sh` checks required files, Docker, SSH,
+  local and worker image presence, existing DSpark containers, and port `8888`
+  before starting.
+- `start-deepseek-v4-flash-dspark.sh` uses the explicit Compose project
+  `deepseek-v4-flash`, so folder names do not change container names.
+- `start-deepseek-v4-flash-dspark.sh` passes `.env.dspark` values explicitly to
+  Compose, avoiding inherited shell variables such as `MASTER_PORT=29500`.
+- `prepare-dspark-model-cache.sh` checks the Stage C image before downloading
+  and verifies the worker image before remote cache preparation.
+- `stop-deepseek-v4-flash-dspark.sh` uses the same Compose project and falls
+  back to removing Compose-labeled `vllm-dspark` containers on both nodes.
+
+## Runtime Profile
+
+Core vLLM flags for the current local profile:
+
+- `--tensor-parallel-size 2`
+- `--distributed-executor-backend mp`
+- `--nnodes 2`
+- `--kv-cache-dtype nvfp4_ds_mla`
+- `--block-size 256`
+- `--max-model-len 1048576`
+- `--max-num-seqs 6`
+- `--max-num-batched-tokens 8192`
+- `--gpu-memory-utilization 0.85`
+- `--speculative-config '{"method":"dspark","num_speculative_tokens":5}'`
+
+Key runtime env:
+
+- `VLLM_USE_B12X_MOE=1`
+- `VLLM_USE_B12X_WO_PROJECTION=0`
+- `VLLM_DSPARK_CONFIDENCE_SCHEDULER=off`
+- `VLLM_DSPARK_LOCAL_ARGMAX=1`
+- `VLLM_DSPARK_REPLICATE_MARKOV_W1=1`
+- `VLLM_DSPARK_FUSED_MARKOV_ARGMAX=0`
+- `VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT=0`
+- `VLLM_DSV4_B12X_COMPRESSED_MLA=0`
+- `VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE=0`
+- `B12X_W4A16_TC_DECODE=0`
+
+## Verify
+
+Render the Compose config without starting the service:
 
 ```bash
-curl http://127.0.0.1:8888/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek-v4-flash-dspark",
-    "messages": [
-      {"role": "user", "content": "Reply with OK."}
-    ],
-    "max_tokens": 8,
-    "temperature": 0.0
-  }'
+env -u MASTER_PORT -u NODE_RANK -u HEADLESS -u WORKER_HOST -u MASTER_ADDR \
+  COMPOSE_DISABLE_ENV_FILE=1 \
+  docker compose --env-file .env.dspark -f docker-compose.dspark.yml config \
+  | grep -E -- '--max-model-len|--max-num-seqs|--master-port|--kv-cache-dtype|image:'
 ```
 
-### Streaming
-
-```bash
-curl http://127.0.0.1:8888/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek-v4-flash-dspark",
-    "messages": [
-      {"role": "user", "content": "Write a short note about distributed inference."}
-    ],
-    "stream": true,
-    "max_tokens": 128
-  }'
-```
-
-## Architecture
-
-```text
-┌─────────────────────────┐       InfiniBand/RoCE       ┌─────────────────────────┐
-│     spark1 / head       │◄────────────────────────────►│    spark2 / worker      │
-│  NODE_RANK=0            │    torch.distributed/NCCL     │  NODE_RANK=1            │
-│                         │                               │  HEADLESS=1             │
-│  vLLM DSpark service    │                               │  vLLM DSpark service    │
-│  TP rank 0              │                               │  TP rank 1              │
-│  API port 8888          │                               │  headless worker        │
-└─────────────────────────┘                               └─────────────────────────┘
-```
-
-## DSpark Runtime Parameters
-
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| `--tensor-parallel-size` | `2` | Split model across both DGX Spark nodes |
-| `--pipeline-parallel-size` | `1` | No pipeline parallelism |
-| `--distributed-executor-backend` | `mp` | vLLM multiprocess distributed executor |
-| `--nnodes` | `2` | Two-node launch |
-| `--kv-cache-dtype` | `fp8` | FP8 KV cache |
-| `--max-model-len` | `262144` | Validated DSpark context length |
-| `--max-num-seqs` | `1` | Single-stream decode profile |
-| `--max-num-batched-tokens` | `8192` | Prefill/batch token cap |
-| `--gpu-memory-utilization` | `0.80` | Validated memory budget |
-| `--speculative-config` | `{"method":"dspark","num_speculative_tokens":5}` | DSpark 5-token draft block |
-| `--served-model-name` | `deepseek-v4-flash-dspark` | OpenAI API model id |
-
-Key DSpark/B12X environment defaults:
-
-| Variable | Value |
-|----------|-------|
-| `VLLM_USE_B12X_MOE` | `1` |
-| `VLLM_USE_B12X_WO_PROJECTION` | `1` |
-| `VLLM_DSPARK_CONFIDENCE_SCHEDULER` | `off` |
-| `VLLM_DSPARK_LOCAL_ARGMAX` | `1` |
-| `VLLM_DSPARK_REPLICATE_MARKOV_W1` | `1` |
-| `VLLM_DSPARK_FUSED_MARKOV_ARGMAX` | `0` |
-| `VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT` | `0` |
-| `VLLM_DSV4_B12X_COMPRESSED_MLA` | `0` |
-| `VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE` | `0` |
-| `B12X_W4A16_TC_DECODE` | `0` |
-
-## Legacy MTP Fallback
-
-The original plain DeepSeek V4 Flash MTP launch remains available:
-
-```bash
-./start-deepseek-v4-flash.sh
-./stop-deepseek-v4-flash.sh
-```
-
-That path uses `docker-compose.yml`, serves `deepseek-ai/DeepSeek-V4-Flash`, and is separate from the DSpark compose file. Do not run both paths on port `8888` at the same time.
-
-## Troubleshooting
-
-### JSON/API Sanity Check
+After launch:
 
 ```bash
 curl -fsS http://127.0.0.1:8888/v1/models
 ```
 
-### Logs
+Confirm the returned model entry reports:
 
-Head:
+```json
+"max_model_len": 1048576
+```
+
+Check logs:
 
 ```bash
-COMPOSE_DISABLE_ENV_FILE=1 docker compose --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=120 vllm-dspark
+docker compose -p deepseek-v4-flash --env-file .env.dspark -f docker-compose.dspark.yml logs vllm-dspark \
+  | grep -E "GPU KV cache size|Maximum concurrency"
 ```
 
-Worker:
+## Credits
 
-```bash
-ssh "$WORKER_HOST" "cd '$PWD' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 docker compose --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=120 vllm-dspark"
-```
+See [`CREDITS.md`](CREDITS.md) for full attribution.
 
-### Model Cache Incomplete
+In short, this recipe combines Rafael Caricio's DSpark vLLM integration, Fraser
+Price's DeepSeek V4 Flash DSpark work, MiaAI-Lab's two-node DGX Spark packaging,
+Keys/drowzeys' DSpark concurrency patch, and upstream vLLM/FlashInfer/NVIDIA/
+DeepSeek components.
 
-Run:
+This repo's contribution is the NVFP4-KV Stage A/B/C recipe, the two-node DGX
+Spark packaging, the applied Keys concurrency overlay, hardened helper scripts,
+and benchmark artifacts from the validated runs.
 
-```bash
-./prepare-dspark-model-cache.sh
-```
+## License Notes
 
-A good cache reports:
-
-```text
-safetensor_shards=48
-missing_shards=0
-```
-
-If Hugging Face downloads stall, keep `HF_HUB_DISABLE_XET=1` in `.env.dspark`.
-
-### Runtime Image Missing
-
-Run:
-
-```bash
-./build-dspark-vllm-runtime.sh
-```
-
-Successful image verification prints:
-
-```text
-dspark overlay ok vllm.v1.spec_decode.dspark vllm.v1.spec_decode.dspark_proposer
-```
-
-### NCCL / RoCE
-
-- Confirm IB link state with `ibstat`.
-- Confirm HCA and interface names with `ibdev2netdev -v`.
-- Confirm passwordless SSH with `ssh "$WORKER_HOST" hostname`.
-- Check that both nodes use the same `MASTER_ADDR`, `MASTER_PORT`, `NCCL_IB_HCA`, and `NCCL_SOCKET_IFNAME`.
-
-### Port Conflict
-
-DSpark serves on port `8888`. Stop the legacy MTP path or any other service using that port before starting DSpark.
-
-## Validation Snapshot
-
-This repo's DSpark path was validated on a 2-node DGX Spark cluster with:
-
-- `vllm-dspark-runtime:clean` built on both nodes
-- `DeepSeek-V4-Flash-DSpark` cache verified on both nodes: 48 safetensor shards, 0 missing
-- TP=2 world initialized over NCCL
-- `/v1/models` returning `deepseek-v4-flash-dspark`
-- Minimal `/v1/chat/completions` request succeeding
-
-## License
-
-Repository scripts and configuration are provided under the MIT License. Model weights are governed by the corresponding DeepSeek Hugging Face model license. The DSpark runtime image is built from Rafael Caricio's vLLM fork and the referenced base image; review those upstream licenses before redistribution.
+Repo scripts and docs are published under this repo's `LICENSE`. The vLLM
+overlay/runtime files are vLLM-derived and retain their Apache-2.0 lineage and
+SPDX headers where present. Base images, FlashInfer/TileLang/Triton/CUDA/NCCL,
+and model weights are separate upstream artifacts with their own licenses and
+usage terms.
