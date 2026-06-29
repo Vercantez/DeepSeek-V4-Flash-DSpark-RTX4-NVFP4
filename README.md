@@ -104,7 +104,7 @@ VLLM_USE_B12X_WO_PROJECTION=1
 
 Measured aggregate decode reached `315.1 tok/s` for static C16 and `205.0 tok/s`
 for staggered C16. Those numbers are benchmark evidence for the 200k/16 Keys
-profile, not for the current 500k/8 local profile.
+profile, not for the current 1M/6 local profile.
 
 ## High-Concurrency Mode
 
