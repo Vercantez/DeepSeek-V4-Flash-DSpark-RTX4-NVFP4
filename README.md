@@ -20,8 +20,8 @@ real independent sessions.
 
 The current local run profile is configured for:
 
-- `max_model_len=500000`
-- `max_num_seqs=12`
+- `max_model_len=1048576`
+- `max_num_seqs=6`
 - `kv_cache_dtype=nvfp4_ds_mla`
 - `gpu_memory_utilization=0.84`
 - API bind address `0.0.0.0:8888`
@@ -33,12 +33,12 @@ It also includes the Keys concurrency checkpoint in
 
 ## Current Profile
 
-The active local `.env.dspark` profile is a 500k-context, 12-sequence
+The active local `.env.dspark` profile is a 1M-context, 6-sequence
 configuration for the same Stage C NVFP4 runtime:
 
 ```env
-MAX_MODEL_LEN=500000
-MAX_NUM_SEQS=12
+MAX_MODEL_LEN=1048576
+MAX_NUM_SEQS=6
 DSPARK_VLLM_IMAGE=vllm-dspark-runtime:dspark-nvfp4-stage-c
 VLLM_USE_B12X_WO_PROJECTION=1
 VLLM_HOST=0.0.0.0
@@ -48,20 +48,20 @@ The rendered vLLM command should include:
 
 ```text
 --kv-cache-dtype nvfp4_ds_mla
---max-model-len 500000
---max-num-seqs 12
+--max-model-len 1048576
+--max-num-seqs 6
 --master-port 25000
 ```
 
-The 12-sequence profile should be treated as an agent-serving target. It keeps a
-500k per-request ceiling while allowing twelve active sequences to share the KV
-pool. If it is unstable under your real workload, use the 1M/2 conservative
-profile below or reduce `MAX_NUM_SEQS` to `4`.
+The 6-sequence profile should be treated as an agent-serving target. It keeps a
+1M per-request ceiling while allowing six active sequences to share the KV
+pool. If it is unstable under your real workload, use the 500k/4 fallback below
+or reduce `MAX_NUM_SEQS` to `2`.
 
 > **Important:** The current profile is meant for real deep-context operation:
-> up to **500k tokens per separate session** with `MAX_NUM_SEQS=12`. The KV cache
-> is a shared pool, so twelve sessions do not each reserve 500k tokens up front.
-> Normal agent sessions can run concurrently while retaining the 500k ceiling for
+> up to **1M tokens per separate session** with `MAX_NUM_SEQS=6`. The KV cache
+> is a shared pool, so six sessions do not each reserve 1M tokens up front.
+> Normal agent sessions can run concurrently while retaining the 1M ceiling for
 > unusually long requests.
 
 > **Reported 1M/6 test:** A live 6-way run on the same recipe line reported
@@ -84,7 +84,7 @@ MAX_MODEL_LEN=500000
 MAX_NUM_SEQS=4
 ```
 
-That trades the current 500k/12 profile for lower per-request context and more KV
+That trades the current 1M/6 profile for lower per-request context and more KV
 headroom per active session.
 
 ## Keys Concurrency Patch
@@ -135,7 +135,7 @@ What changes:
   path used by the measured high-concurrency run.
 
 Use this mode when aggregate concurrency matters more than 500k/1M context per
-individual session. For deep-context agent work, keep the default 500k/12 profile
+individual session. For deep-context agent work, keep the default 1M/6 profile
 or use the 500k/4 fallback if your workload pushes the KV pool too hard.
 
 After starting the server, you can run the included concurrency probes:
@@ -250,7 +250,7 @@ NCCL_SOCKET_IFNAME=enp1s0f1np1
 NCCL_IB_GID_INDEX=0
 HF_CACHE=/home/zurih/.cache/huggingface
 MAX_MODEL_LEN=500000
-MAX_NUM_SEQS=12
+MAX_NUM_SEQS=6
 ```
 
 For high-concurrency serving, use the `200000 / 16` profile described in
