@@ -15,7 +15,7 @@ The current local run profile is configured for:
 - `max_num_seqs=12`
 - `kv_cache_dtype=nvfp4_ds_mla`
 - `gpu_memory_utilization=0.84`
-- API bind address `127.0.0.1:8888`
+- API bind address `0.0.0.0:8888`
 
 This repository also includes the original validated 2026-06-29 1M checkpoint
 evidence in [`benchmarks/20260629-dspark-nvfp4-1m-context-checkpoint.md`](benchmarks/20260629-dspark-nvfp4-1m-context-checkpoint.md).
@@ -32,7 +32,7 @@ MAX_MODEL_LEN=500000
 MAX_NUM_SEQS=12
 DSPARK_VLLM_IMAGE=vllm-dspark-runtime:dspark-nvfp4-stage-c
 VLLM_USE_B12X_WO_PROJECTION=1
-VLLM_HOST=127.0.0.1
+VLLM_HOST=0.0.0.0
 ```
 
 The rendered vLLM command should include:
@@ -309,8 +309,8 @@ The API serves at:
 http://127.0.0.1:8888/v1
 ```
 
-By default the service binds to `127.0.0.1`. Set `VLLM_HOST=0.0.0.0` only
-when you intentionally want to expose the API beyond the head node.
+By default the service binds to `0.0.0.0`. Set `VLLM_HOST=127.0.0.1` only if
+you intentionally want to keep the API loopback-only on the head node.
 
 ## Script Behavior
 
