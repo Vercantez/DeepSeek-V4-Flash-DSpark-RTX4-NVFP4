@@ -190,8 +190,6 @@ reproducible recipe.
 | `smoke-deepseek-v4-flash-dspark.sh` | runs a configurable concurrent API smoke test |
 | `PLANS.md` | script-hardening scope and validation notes |
 | `patches/keys-concurrency.patch` | vendored Keys DSpark concurrency patch |
-| `benchmarks/keys-concurrency/` | Keys concurrency benchmark scripts |
-| `benchmarks/` | measured 1M and Keys concurrency checkpoint evidence |
 | `CREDITS.md` | attribution and license notes for upstream work |
 
 ## Quick Start
@@ -372,8 +370,7 @@ Keys/drowzeys' DSpark concurrency patch, and upstream vLLM/FlashInfer/NVIDIA/
 DeepSeek components.
 
 This repo's contribution is the NVFP4-KV Stage A/B/C recipe, the two-node DGX
-Spark packaging, the applied Keys concurrency overlay, hardened helper scripts,
-and benchmark artifacts from the validated runs.
+Spark packaging, the applied Keys concurrency overlay, hardened helper scripts from the validated runs.
 
 ## License Notes
 
