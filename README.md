@@ -23,7 +23,7 @@ The current local run profile is configured for:
 - `max_model_len=1000000`
 - `max_num_seqs=12`
 - `kv_cache_dtype=nvfp4_ds_mla`
-- `gpu_memory_utilization=0.80`
+- `gpu_memory_utilization=0.85`
 - API bind address `0.0.0.0:8888`
 
 > [!IMPORTANT]
