@@ -18,6 +18,7 @@ fi
 : "${WORKER_HOST:?WORKER_HOST must be set in $ENV_FILE or environment}"
 
 cd "$SCRIPT_DIR"
+WORKER_DIR="${WORKER_SCRIPT_DIR:-${WORKER_DIR:-$SCRIPT_DIR}}"
 
 show_logs() {
   local project="$1"
@@ -25,7 +26,7 @@ show_logs() {
   COMPOSE_DISABLE_ENV_FILE=1 docker compose -p "$project" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --tail="$TAIL" vllm-dspark || true
   echo
   echo "== worker logs: $project =="
-  ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$project' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail='$TAIL' vllm-dspark" || true
+  ssh "$WORKER_HOST" "cd '$WORKER_DIR' && COMPOSE_DISABLE_ENV_FILE=1 docker compose -p '$project' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail='$TAIL' vllm-dspark" || true
   echo
 }
 

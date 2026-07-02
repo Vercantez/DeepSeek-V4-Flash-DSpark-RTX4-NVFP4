@@ -11,6 +11,10 @@ if [ -f "$ENV_FILE" ]; then
   set +a
 fi
 
+if [ -n "${THIS_NODE_HF_CACHE:-}" ]; then
+  HF_CACHE="$THIS_NODE_HF_CACHE"
+fi
+
 : "${DSPARK_MODEL:=deepseek-ai/DeepSeek-V4-Flash-DSpark}"
 : "${HF_CACHE:=$HOME/.cache/huggingface}"
 : "${HF_DOWNLOAD_WORKERS:=1}"
@@ -91,11 +95,13 @@ verify_cache
 
 if [ "${PREPARE_WORKER:-1}" = "1" ]; then
   : "${WORKER_HOST:?WORKER_HOST must be set in $ENV_FILE or environment}"
+  WORKER_DIR="${WORKER_SCRIPT_DIR:-${WORKER_DIR:-$SCRIPT_DIR}}"
+  WORKER_HF_CACHE="${WORKER_HF_CACHE:-$HF_CACHE}"
   need_cmd ssh
   need_cmd scp
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$WORKER_HOST" "mkdir -p '$SCRIPT_DIR' '$HF_CACHE'"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$WORKER_HOST" "mkdir -p '$WORKER_DIR' '$WORKER_HF_CACHE'"
   verify_worker_image
-  scp "$SCRIPT_DIR/prepare-dspark-model-cache.sh" "${WORKER_HOST}:${SCRIPT_DIR}/prepare-dspark-model-cache.sh"
-  scp "$ENV_FILE" "${WORKER_HOST}:${SCRIPT_DIR}/.env.dspark"
-  ssh "$WORKER_HOST" "cd '$SCRIPT_DIR' && chmod +x ./prepare-dspark-model-cache.sh && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS ENV_FILE='$ENV_FILE' PREPARE_WORKER=0 ./prepare-dspark-model-cache.sh"
+  scp "$SCRIPT_DIR/prepare-dspark-model-cache.sh" "${WORKER_HOST}:${WORKER_DIR}/prepare-dspark-model-cache.sh"
+  scp "$ENV_FILE" "${WORKER_HOST}:${WORKER_DIR}/.env.dspark"
+  ssh "$WORKER_HOST" "cd '$WORKER_DIR' && chmod +x ./prepare-dspark-model-cache.sh && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS ENV_FILE='.env.dspark' THIS_NODE_HF_CACHE='$WORKER_HF_CACHE' PREPARE_WORKER=0 ./prepare-dspark-model-cache.sh"
 fi

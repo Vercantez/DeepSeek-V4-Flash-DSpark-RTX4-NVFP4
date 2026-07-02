@@ -23,11 +23,18 @@ services:
       TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       HF_HUB_DISABLE_XET: "${HF_HUB_DISABLE_XET:-1}"
       VLLM_CACHE_ROOT: /cache/huggingface/vllm-cache
+      VLLM_HOST_IP: "${VLLM_HOST_IP:-}"
 
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}"
       VLLM_TRITON_MLA_SPARSE: "${VLLM_TRITON_MLA_SPARSE:-1}"
       VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-256}"
+      VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
       VLLM_SKIP_INIT_MEMORY_CHECK: "${VLLM_SKIP_INIT_MEMORY_CHECK:-1}"
+
+      GENERATION_TEMPERATURE: "${GENERATION_TEMPERATURE:-0.0}"
+      GENERATION_TOP_P: "${GENERATION_TOP_P:-1.0}"
+      GENERATION_TOP_K: "${GENERATION_TOP_K:-40}"
+      GENERATION_REPETITION_PENALTY: "${GENERATION_REPETITION_PENALTY:-1.05}"
 
       VLLM_USE_B12X_MOE: "${VLLM_USE_B12X_MOE:-1}"
       VLLM_USE_B12X_WO_PROJECTION: "${VLLM_USE_B12X_WO_PROJECTION:-1}"
@@ -82,6 +89,8 @@ services:
         export CUDA_PATH="$${CUDA_PATH:-$${CUDA_HOME}}";
         export CUDAToolkit_ROOT="$${CUDAToolkit_ROOT:-$${CUDA_HOME}}";
         export LD_LIBRARY_PATH="/opt/env/lib:/opt/env/targets/sbsa-linux/lib:$${LD_LIBRARY_PATH:-}";
+        SPECULATIVE_CONFIG="{\"method\":\"dspark\",\"num_speculative_tokens\":$${MTP_NUM_TOKENS:-5}}";
+        GENERATION_CONFIG_JSON="{\"temperature\":$${GENERATION_TEMPERATURE:-0.0},\"top_p\":$${GENERATION_TOP_P:-1.0},\"top_k\":$${GENERATION_TOP_K:-40},\"repetition_penalty\":$${GENERATION_REPETITION_PENALTY:-1.05}}";
         exec /opt/env/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}
         --host ${VLLM_HOST:-127.0.0.1}
@@ -92,18 +101,20 @@ services:
         --kv-cache-dtype nvfp4_ds_mla
         --block-size 256
         --max-model-len ${MAX_MODEL_LEN:-1048576}
-        --max-num-seqs ${MAX_NUM_SEQS:-1}
+        --max-num-seqs ${MAX_NUM_SEQS:-6}
         --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-8192}
         --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.80}
         --enable-prefix-caching
-        --speculative-config '{"method":"dspark","num_speculative_tokens":5}'
+        --speculative-config "$${SPECULATIVE_CONFIG}"
         --tokenizer-mode deepseek_v4
         --distributed-executor-backend mp
         --tool-call-parser deepseek_v4
         --enable-auto-tool-choice
         --reasoning-parser deepseek_v4
         --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
-        --default-chat-template-kwargs '{"thinking":true}'
+        --default-chat-template-kwargs '{"thinking":false}'
+        --generation-config vllm
+        --override-generation-config "$${GENERATION_CONFIG_JSON}"
         --enable-flashinfer-autotune
         --nnodes 2
         --node-rank ${NODE_RANK}
