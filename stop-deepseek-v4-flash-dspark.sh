@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env.dspark}"
 COMPOSE_FILE="${COMPOSE_FILE:-$SCRIPT_DIR/docker-compose.dspark.yml}"
+PROJECT_NAME="${PROJECT_NAME:-deepseek-v4-flash}"
+LEGACY_PROJECT_NAME="${LEGACY_PROJECT_NAME:-$(basename "$SCRIPT_DIR" | tr '[:upper:]' '[:lower:]')}"
 
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -20,10 +22,19 @@ WORKER_DIR="${WORKER_SCRIPT_DIR:-${WORKER_DIR:-$SCRIPT_DIR}}"
 WORKER_HF_CACHE="${WORKER_HF_CACHE:-${HF_CACHE:-}}"
 WORKER_VLLM_HOST_IP="${WORKER_VLLM_HOST_IP:-}"
 
-echo "Stopping DSpark head..."
-COMPOSE_DISABLE_ENV_FILE=1 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down || true
+stop_project() {
+  local project="$1"
 
-echo "Stopping DSpark worker on ${WORKER_HOST}..."
-ssh "$WORKER_HOST" "cd '$WORKER_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 HF_CACHE='$WORKER_HF_CACHE' VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' docker compose --env-file .env.dspark -f docker-compose.dspark.yml down" || true
+  echo "Stopping DSpark head project ${project}..."
+  COMPOSE_DISABLE_ENV_FILE=1 docker compose -p "$project" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down || true
+
+  echo "Stopping DSpark worker project ${project} on ${WORKER_HOST}..."
+  ssh "$WORKER_HOST" "cd '$WORKER_DIR' && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1 HF_CACHE='$WORKER_HF_CACHE' VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' docker compose -p '$project' --env-file .env.dspark -f docker-compose.dspark.yml down" || true
+}
+
+stop_project "$PROJECT_NAME"
+if [ "$LEGACY_PROJECT_NAME" != "$PROJECT_NAME" ]; then
+  stop_project "$LEGACY_PROJECT_NAME"
+fi
 
 echo "DeepSeek V4 Flash DSpark stopped."
