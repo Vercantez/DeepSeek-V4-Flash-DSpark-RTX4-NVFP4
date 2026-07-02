@@ -38,7 +38,10 @@ WORKER_VLLM_HOST_IP="${WORKER_VLLM_HOST_IP:-$WORKER_HOST}"
 WORKER_DIR="${WORKER_SCRIPT_DIR:-${WORKER_DIR:-$SCRIPT_DIR}}"
 WORKER_HF_CACHE="${WORKER_HF_CACHE:-${HF_CACHE:-}}"
 REMOTE_WORKER_DIR="$(printf '%q' "$WORKER_DIR")"
+REMOTE_COMPOSE_FILE="$REMOTE_WORKER_DIR/docker-compose.dspark.yml"
+REMOTE_ENV_FILE="$REMOTE_WORKER_DIR/.env.dspark"
 REMOTE_COMPOSE="cd $REMOTE_WORKER_DIR && env -u MASTER_ADDR -u MASTER_PORT -u NODE_RANK -u HEADLESS COMPOSE_DISABLE_ENV_FILE=1"
+STARTUP_LOG_SINCE=""
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -61,6 +64,10 @@ compose_base() {
     docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "${@:3}"
 }
 
+remote_compose() {
+  ssh "$WORKER_HOST" "$REMOTE_COMPOSE $*"
+}
+
 log_since() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
@@ -69,7 +76,7 @@ print_startup_logs() {
   local since="$1"
 
   compose_base 0 "" logs --since "$since" vllm-dspark || true
-  ssh "$WORKER_HOST" "$REMOTE_COMPOSE docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --since '$since' vllm-dspark" || true
+  remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --since '$since' vllm-dspark" || true
 }
 
 wait_with_startup_logs() {
@@ -82,7 +89,47 @@ wait_with_startup_logs() {
 
 print_initial_startup_logs() {
   compose_base 0 "" logs --tail=100 vllm-dspark || true
-  ssh "$WORKER_HOST" "$REMOTE_COMPOSE docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=100 vllm-dspark" || true
+  remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=100 vllm-dspark" || true
+}
+
+print_failure_logs() {
+  local since="${STARTUP_LOG_SINCE:-$(log_since)}"
+
+  echo "Startup failed. Recent head logs:" >&2
+  compose_base 0 "" logs --since "$since" vllm-dspark >&2 || true
+  echo "Recent worker logs:" >&2
+  remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --since '$since' vllm-dspark" >&2 || true
+}
+
+on_error() {
+  local status=$?
+  trap - ERR
+  print_failure_logs
+  exit "$status"
+}
+
+print_resolved_profile() {
+  echo "Resolved DSpark profile:"
+  echo "  project: $PROJECT_NAME"
+  echo "  image: $DSPARK_VLLM_IMAGE"
+  echo "  model: ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}"
+  echo "  served model: ${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}"
+  echo "  max model len: ${MAX_MODEL_LEN:-1000000}"
+  echo "  max num seqs: ${MAX_NUM_SEQS:-12}"
+  echo "  max batched tokens: ${MAX_NUM_BATCHED_TOKENS:-8192}"
+  echo "  gpu memory utilization: ${GPU_MEMORY_UTILIZATION:-0.80}"
+  echo "  mtp speculative tokens: ${MTP_NUM_TOKENS:-5}"
+  echo "  head host/ip: ${VLLM_HOST:-127.0.0.1} / $VLLM_HOST_IP"
+  echo "  worker host/ip: $WORKER_HOST / $WORKER_VLLM_HOST_IP"
+  echo "  worker dir: $WORKER_DIR"
+  echo "  worker cache: ${WORKER_HF_CACHE:-${HF_CACHE:-}}"
+}
+
+validate_compose() {
+  echo "Validating head compose config..."
+  compose_base 0 "" config --quiet
+  echo "Validating worker compose config..."
+  remote_compose "NODE_RANK=1 HEADLESS=1 HF_CACHE='$WORKER_HF_CACHE' VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml config --quiet"
 }
 
 need_cmd docker
@@ -119,14 +166,18 @@ fi
 ssh "$WORKER_HOST" "if docker ps --format '{{.Names}}' | grep -qx '${PROJECT_NAME}-vllm-dspark-1'; then echo 'DSpark worker container already exists for project $PROJECT_NAME.' >&2; exit 1; fi"
 
 cd "$SCRIPT_DIR"
+STARTUP_LOG_SINCE="$(log_since)"
+trap on_error ERR
+print_resolved_profile
 
 echo "Syncing DSpark deployment files to ${WORKER_HOST}:${WORKER_DIR}"
 ssh "$WORKER_HOST" "mkdir -p $REMOTE_WORKER_DIR"
-scp "$COMPOSE_FILE" "${WORKER_HOST}:${WORKER_DIR}/docker-compose.dspark.yml"
-scp "$ENV_FILE" "${WORKER_HOST}:${WORKER_DIR}/.env.dspark"
+scp "$COMPOSE_FILE" "${WORKER_HOST}:${REMOTE_COMPOSE_FILE}"
+scp "$ENV_FILE" "${WORKER_HOST}:${REMOTE_ENV_FILE}"
+validate_compose
 
 echo "Starting DSpark worker on ${WORKER_HOST}..."
-ssh "$WORKER_HOST" "$REMOTE_COMPOSE NODE_RANK=1 HEADLESS=1 HF_CACHE='$WORKER_HF_CACHE' VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml up -d"
+remote_compose "NODE_RANK=1 HEADLESS=1 HF_CACHE='$WORKER_HF_CACHE' VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml up -d"
 
 echo "Starting DSpark head..."
 compose_base 0 "" up -d
@@ -137,7 +188,7 @@ for _ in $(seq 1 "$WAIT_ATTEMPTS"); do
   if curl -fsS --max-time 5 "$API_URL" >/dev/null 2>&1; then
     echo "DeepSeek V4 Flash DSpark is running: $API_URL"
     compose_base 0 "" ps
-    ssh "$WORKER_HOST" "$REMOTE_COMPOSE docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml ps"
+    remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml ps"
     echo "Running minimal OpenAI-compatible chat request..."
     curl -fsS --max-time 60 "$CHAT_URL" \
       -H "Content-Type: application/json" \
@@ -151,5 +202,5 @@ done
 echo "Timed out waiting for DSpark API. Recent head logs:" >&2
 compose_base 0 "" logs --tail=120 vllm-dspark >&2 || true
 echo "Recent worker logs:" >&2
-ssh "$WORKER_HOST" "$REMOTE_COMPOSE docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=120 vllm-dspark" >&2 || true
+remote_compose "docker compose -p '$PROJECT_NAME' --env-file .env.dspark -f docker-compose.dspark.yml logs --tail=120 vllm-dspark" >&2 || true
 exit 1

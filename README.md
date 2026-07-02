@@ -20,9 +20,9 @@ agent-stability refresh, and the 2026-07-02 Keys C12 checkpoint:
   staggered C16 at `205.0 tok/s` aggregate
 
 If you already deployed an older copy and saw agent garble, loops, Chinese
-drift, or prompt/tool XML leaking into replies, start with
-[`AGENT_GARBLE_FIX.md`](AGENT_GARBLE_FIX.md). The fix path keeps the C12 NVFP4
-profile; it does not switch production to fp8 or a smaller fallback model.
+drift, or prompt/tool XML leaking into replies, keep the C12 NVFP4 profile and
+validate direct API behavior before changing agent harness settings. The fix
+path does not switch production to fp8 or a smaller fallback model.
 
 ## Result
 
@@ -409,7 +409,6 @@ usage terms.
 | `patches/keys-concurrency.patch` | full path-adjusted Keys concurrency patch reference |
 | `docs/PATCHES.md` | plain-English Patch 1 / Patch 2 / Patch 2b concurrency explanation |
 | `UPSTREAM_V024_STATUS.md` | current vLLM v0.24.0 vs DSpark PR #46995 upgrade notes |
-| `AGENT_GARBLE_FIX.md` | update path for older deployments that saw agent garble/drift/loops |
 | `scripts/agent_sanity_bench.py` | direct OpenAI-compatible 1/2/4/6 concurrency and garble check |
 | `scripts/capture_runtime.sh` | captures head/worker Docker inspect, ps, and log tails before/after changes |
 | `benchmarks/` | local benchmark scripts retained from this checkout; upstream benchmark artifacts were intentionally not imported |
@@ -478,6 +477,12 @@ Start the service:
 ```bash
 ./start-deepseek-v4-flash-dspark.sh
 ```
+
+The start script prints the resolved non-secret runtime profile, syncs the
+compose/env files to the worker path, validates rendered Docker Compose on both
+nodes, starts the worker first, then starts the head and follows startup logs
+while waiting for the API. If startup fails, it prints recent head and worker
+logs before exiting.
 
 The API serves at:
 
@@ -617,7 +622,8 @@ scripts/capture_runtime.sh runtime-after-change
   `MTP_NUM_TOKENS=5`, `VLLM_DSPARK_GPU_REJECTED_CONTEXT_MASK=1`,
   `VLLM_USE_B12X_WO_PROJECTION=1`, deterministic generation overrides, and
   `VLLM_DSV4_B12X_COMPRESSED_MLA=0`.
-- Worker-first startup avoids a race during multi-node `mp` initialization.
+- Worker-first startup avoids a race during multi-node `mp` initialization and
+  now validates rendered compose on both nodes before starting containers.
 - Requires matching images on both nodes, correct NCCL/RoCE settings, and a
   two-node Blackwell-class/DGX Spark setup.
 - The API binds to `127.0.0.1` by default; exposing it is a deliberate security
