@@ -4,6 +4,28 @@ Self-contained two-node DGX Spark recipe for serving `DeepSeek-V4-Flash-DSpark`
 with vLLM TP=2, DSpark speculative decoding, and a 1M-token max model length
 using the experimental `nvfp4_ds_mla` KV-cache path.
 
+This repo includes Keys' DSpark concurrency patch in the vLLM overlay. That
+patch makes DSpark's persistent draft KV follow request identity instead of
+condensed batch-row position, and adds ragged mixed prefill/decode handling for
+real independent sessions.
+
+<p>
+<a href="https://x.com/MiaAI_lab" target="_blank">
+  <img src="https://img.shields.io/badge/Follow%20me%20on%20X-000000?style=for-the-badge&logo=x&logoColor=white" alt="Follow Mia on X" />
+</a>
+</p>
+<p>
+<a href='https://ko-fi.com/Z8Z3SPLOD' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+</p>
+
+The current local run profile is configured for:
+
+- `max_model_len=1000000`
+- `max_num_seqs=12`
+- `kv_cache_dtype=nvfp4_ds_mla`
+- `gpu_memory_utilization=0.80`
+- API bind address `0.0.0.0:8888`
+
 This repo captures the validated Stage C NVFP4 runtime, the 2026-06-30
 agent-stability refresh, and the 2026-07-02 Keys C12 checkpoint:
 
