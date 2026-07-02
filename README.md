@@ -33,6 +33,17 @@ The current local run profile is configured for:
 > sessions can run concurrently while retaining the 1M ceiling for unusually
 > long requests.
 
+> [!IMPORTANT]
+> For long coding tasks and big prompts, use:
+>
+> ```env
+> MAX_MODEL_LEN=1000000
+> MAX_NUM_SEQS=4
+> MAX_NUM_BATCHED_TOKENS=16384
+> GPU_MEMORY_UTILIZATION=0.87
+> GENERATION_MAX_TOKENS=384000
+> ```
+
 This repo captures the validated Stage C NVFP4 runtime, the 2026-06-30
 agent-stability refresh, and the 2026-07-02 Keys C12 checkpoint:
 

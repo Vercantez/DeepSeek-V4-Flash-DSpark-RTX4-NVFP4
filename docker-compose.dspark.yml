@@ -35,6 +35,7 @@ services:
       GENERATION_TOP_P: "${GENERATION_TOP_P:-1.0}"
       GENERATION_TOP_K: "${GENERATION_TOP_K:-40}"
       GENERATION_REPETITION_PENALTY: "${GENERATION_REPETITION_PENALTY:-1.05}"
+      GENERATION_MAX_TOKENS: "${GENERATION_MAX_TOKENS:-384000}"
 
       VLLM_USE_B12X_MOE: "${VLLM_USE_B12X_MOE:-1}"
       VLLM_USE_B12X_WO_PROJECTION: "${VLLM_USE_B12X_WO_PROJECTION:-1}"
@@ -90,7 +91,7 @@ services:
         export CUDAToolkit_ROOT="$${CUDAToolkit_ROOT:-$${CUDA_HOME}}";
         export LD_LIBRARY_PATH="/opt/env/lib:/opt/env/targets/sbsa-linux/lib:$${LD_LIBRARY_PATH:-}";
         SPECULATIVE_CONFIG="{\"method\":\"dspark\",\"num_speculative_tokens\":$${MTP_NUM_TOKENS:-5}}";
-        GENERATION_CONFIG_JSON="{\"temperature\":$${GENERATION_TEMPERATURE:-0.0},\"top_p\":$${GENERATION_TOP_P:-1.0},\"top_k\":$${GENERATION_TOP_K:-40},\"repetition_penalty\":$${GENERATION_REPETITION_PENALTY:-1.05}}";
+        GENERATION_CONFIG_JSON="{\"temperature\":$${GENERATION_TEMPERATURE:-0.0},\"top_p\":$${GENERATION_TOP_P:-1.0},\"top_k\":$${GENERATION_TOP_K:-40},\"repetition_penalty\":$${GENERATION_REPETITION_PENALTY:-1.05},\"max_tokens\":$${GENERATION_MAX_TOKENS:-384000}}";
         exec /opt/env/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}
         --host ${VLLM_HOST:-127.0.0.1}
