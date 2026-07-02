@@ -26,6 +26,13 @@ The current local run profile is configured for:
 - `gpu_memory_utilization=0.80`
 - API bind address `0.0.0.0:8888`
 
+> [!IMPORTANT]
+> This profile is meant for real deep-context agent serving: up to **1M tokens
+> per separate session** with `MAX_NUM_SEQS=12`. The KV cache is a shared pool,
+> so twelve sessions do not each reserve 1M tokens up front. Normal agent
+> sessions can run concurrently while retaining the 1M ceiling for unusually
+> long requests.
+
 This repo captures the validated Stage C NVFP4 runtime, the 2026-06-30
 agent-stability refresh, and the 2026-07-02 Keys C12 checkpoint:
 
@@ -45,6 +52,11 @@ If you already deployed an older copy and saw agent garble, loops, Chinese
 drift, or prompt/tool XML leaking into replies, keep the C12 NVFP4 profile and
 validate direct API behavior before changing agent harness settings. The fix
 path does not switch production to fp8 or a smaller fallback model.
+
+> [!WARNING]
+> If direct vLLM prompts are clean but an agent harness still garbles, check the
+> harness session replay, fallback model list, and prompt/tool XML handling
+> before changing DSpark weights or falling back to fp8.
 
 ## Result
 
@@ -260,13 +272,18 @@ harness validation.
 
 ## How the KV cache works (why 1M + concurrency is safe)
 
+> [!NOTE]
+> `max_model_len` and `max_num_seqs` are ceilings, not reservations. The real
+> limit is the sum of live tokens across active requests fitting inside the
+> shared KV pool.
+
 Three independent knobs, often confused:
 
 | knob | what it is | this build |
 | --- | --- | --- |
-| **KV cache pool** | total shared KV memory in tokens, sized from `gpu_memory_utilization` after weights load | ~1.9–2.04M tokens (NVFP4) |
+| **KV cache pool** | total shared KV memory in tokens, sized from `gpu_memory_utilization` after weights load | about 3.2M tokens in the C12 checkpoint |
 | `max_model_len` | per-request **ceiling** — how long any one request may grow | 1,048,576 (1M) |
-| `max_num_seqs` | **concurrency cap** — max active sequences the scheduler runs at once | 6 |
+| `max_num_seqs` | **concurrency cap** — max active sequences the scheduler runs at once | 12 |
 
 The pool is **shared and allocated on demand**: PagedAttention hands KV blocks
 to each request as it generates tokens and frees them when it finishes.
@@ -274,27 +291,32 @@ to each request as it generates tokens and frees them when it finishes.
 NOT pre-allocate `max_num_seqs × max_model_len` of KV. So the real constraint is:
 
 ```
-sum(live tokens across all active requests) <= KV pool (~1.9M)
+sum(live tokens across all active requests) <= KV pool
 ```
 
-Worked examples at 1M ceiling / 6 slots:
+Worked examples at 1M ceiling / 12 slots:
 
 ```
-6 requests x  50k tokens =  300k   fits easily
-6 requests x 200k tokens =  1.2M   fits
-6 requests x 317k tokens =  1.9M   ~at the limit
-2 requests x 1M   tokens =  2.0M   ~at the limit  (this is the "1.81x" boot number)
-6 requests x 1M   tokens =  6.0M   impossible — excess requests queue/preempt
+12 requests x  50k tokens =  600k   fits easily
+12 requests x 200k tokens =  2.4M   fits in the C12 checkpoint pool
+12 requests x 270k tokens =  3.2M   ~at the C12 checkpoint pool
+3 requests  x 1M   tokens =  3.0M   ~near the C12 checkpoint pool
+12 requests x 1M   tokens = 12.0M   impossible — excess requests queue/preempt
 ```
 
-The boot log's `Maximum concurrency for 1,048,576 tokens per request: 1.81x`
-only means ~1.8 *simultaneous full-1M* requests fit. But agent turns are almost
-never near 1M, so 6 normal-length sessions share the pool comfortably while the
+The boot log's `Maximum concurrency for 1,000,000 tokens per request: ~3.2x`
+only means about three *simultaneous full-1M* requests fit. But agent turns are
+almost never near 1M, so 12 normal-length sessions share the pool while the
 1M ceiling stays available for the rare long one. That is exactly why
-`1M + max_num_seqs=6` is safe: you are not reserving 6×1M, you are sharing one
-~1.9M pool across short requests under a high ceiling.
+`1M + max_num_seqs=12` is useful: you are not reserving 12×1M, you are sharing
+one pool across short requests under a high ceiling.
 
 ## Gotcha: gibberish, loops, Chinese drift, or prompt/XML leakage
+
+> [!WARNING]
+> This failure mode is often caused by stale runtime images, inherited sampling
+> defaults, or agent orchestration state. Validate the direct OpenAI-compatible
+> API path first, then test the agent harness.
 
 If the model boots and basic prompts like `hi` work, but real agent traffic
 randomly turns into repeated characters, Chinese drift, leaked tool/schema XML,
@@ -358,14 +380,13 @@ quality tradeoff.
 
 ## Important Caveat
 
-This is the **Stage C padded NVFP4** path. It keeps DeepSeek V4's known-good
-584-byte sparse-MLA cache envelope while routing the runtime through
-`nvfp4_ds_mla`.
-
-It is **not** the unresolved true-layout 416-byte NVFP4 kernel fix. The
-true-layout experiments were useful for diagnosis but failed past roughly 411
-real prompt tokens, so they are intentionally not presented here as the
-reproducible recipe.
+> [!CAUTION]
+> This is the **Stage C padded NVFP4** path. It keeps DeepSeek V4's known-good
+> 584-byte sparse-MLA cache envelope while routing the runtime through
+> `nvfp4_ds_mla`. It is **not** the unresolved true-layout 416-byte NVFP4 kernel
+> fix. The true-layout experiments were useful for diagnosis but failed past
+> roughly 411 real prompt tokens, so they are intentionally not presented here
+> as the reproducible recipe.
 
 ## Credits
 
