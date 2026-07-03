@@ -116,7 +116,11 @@ def discover_asg_backends() -> list[str]:
         "--output",
         "text",
     ]
-    instance_ids = subprocess.check_output(asg_cmd, text=True).split()
+    instance_ids = [
+        value
+        for value in subprocess.check_output(asg_cmd, text=True).split()
+        if value and value != "None"
+    ]
     if not instance_ids:
         return []
 
