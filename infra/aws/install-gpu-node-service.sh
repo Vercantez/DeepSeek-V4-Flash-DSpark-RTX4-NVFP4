@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-/opt/deepseek/mia-dspark-rtx4}"
+HF_CACHE="${HF_CACHE:-/opt/deepseek-cache/hf}"
+
+if [ ! -d "$REPO_DIR" ]; then
+  sudo mkdir -p "$(dirname "$REPO_DIR")"
+  sudo git clone https://github.com/Vercantez/DeepSeek-V4-Flash-DSpark-RTX4-NVFP4 "$REPO_DIR"
+fi
+
+sudo chown -R ubuntu:ubuntu "$REPO_DIR"
+sudo -u ubuntu git -C "$REPO_DIR" fetch --all --prune
+sudo -u ubuntu git -C "$REPO_DIR" checkout main
+sudo -u ubuntu git -C "$REPO_DIR" pull --ff-only
+
+sudo mkdir -p "$HF_CACHE"
+sudo chown -R ubuntu:ubuntu "$(dirname "$HF_CACHE")"
+
+sudo -u ubuntu cp "$REPO_DIR/.env.rtx4.example" "$REPO_DIR/.env.rtx4"
+sudo -u ubuntu sed -i "s#^HF_CACHE=.*#HF_CACHE=$HF_CACHE#" "$REPO_DIR/.env.rtx4"
+if [ -d "$HF_CACHE/hub/models--deepseek-ai--DeepSeek-V4-Flash-DSpark/snapshots" ]; then
+  snapshot="$(find "$HF_CACHE/hub/models--deepseek-ai--DeepSeek-V4-Flash-DSpark/snapshots" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+  if [ -n "$snapshot" ]; then
+    container_snapshot="/cache/huggingface${snapshot#"$HF_CACHE"}"
+    if grep -q '^MODEL_DIR=' "$REPO_DIR/.env.rtx4"; then
+      sudo -u ubuntu sed -i "s#^MODEL_DIR=.*#MODEL_DIR=$container_snapshot#" "$REPO_DIR/.env.rtx4"
+    else
+      echo "MODEL_DIR=$container_snapshot" | sudo -u ubuntu tee -a "$REPO_DIR/.env.rtx4" >/dev/null
+    fi
+  fi
+fi
+
+sudo tee /etc/systemd/system/deepseek-rtx4.service >/dev/null <<EOF
+[Unit]
+Description=DeepSeek V4 Flash DSpark RTX4 vLLM service
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=$REPO_DIR
+Environment=ENV_FILE=$REPO_DIR/.env.rtx4
+ExecStart=$REPO_DIR/start-deepseek-v4-flash-dspark-rtx4.sh
+RemainAfterExit=yes
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /usr/local/bin/deepseek-rtx4-health >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+curl -fsS --max-time 5 http://127.0.0.1:8000/v1/models >/dev/null
+EOF
+sudo chmod +x /usr/local/bin/deepseek-rtx4-health
+
+sudo systemctl daemon-reload
+sudo systemctl enable deepseek-rtx4.service
