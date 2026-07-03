@@ -44,8 +44,15 @@ after Spot termination.
 
 For fastest restarts:
 
-1. Bake the Docker image, repo, systemd service, and Hugging Face model cache
-   into an AMI.
-2. Use an ASG launch template with Spot market options and multiple subnets.
-3. Keep the router on a small on-demand instance so GPU evictions do not remove
+1. Bake the Docker image, repo, and systemd service into a runtime AMI.
+2. Keep the Hugging Face model cache on a separate snapshot-backed EBS volume
+   mounted at `/opt/deepseek-cache`.
+3. Enable Fast Snapshot Restore or pre-warm the cache volume before starting
+   vLLM; otherwise first reads from a fresh snapshot can make shard loading slow.
+4. Use an ASG launch template with Spot market options and multiple subnets.
+5. Keep the router on a small on-demand instance so GPU evictions do not remove
    the public API entrypoint.
+
+`worker-user-data-mount-cache.sh` is the worker launch user-data entrypoint for
+the split-cache setup. It waits for a volume labeled `deepseek-cache`, mounts it,
+then starts `deepseek-rtx4.service`.

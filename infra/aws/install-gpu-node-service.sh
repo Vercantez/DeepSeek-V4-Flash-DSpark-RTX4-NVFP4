@@ -37,6 +37,7 @@ Description=DeepSeek V4 Flash DSpark RTX4 vLLM service
 After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service
+RequiresMountsFor=$HF_CACHE
 
 [Service]
 Type=oneshot
