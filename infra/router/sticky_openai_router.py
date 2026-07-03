@@ -74,6 +74,16 @@ def env_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def env_optional_float(name: str) -> float | None:
+    value = os.environ.get(name)
+    return float(value) if value else None
+
+
+def env_optional_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    return int(value) if value else None
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -89,6 +99,17 @@ AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
 AWS_ASG_NAME = os.environ.get("AWS_ASG_NAME", "")
 ROUTER_API_KEY = os.environ.get("ROUTER_API_KEY", "")
 DEFAULT_CHAT_TEMPLATE_THINKING = env_bool("DEFAULT_CHAT_TEMPLATE_THINKING", False)
+DEFAULT_REQUEST_PARAMS = {
+    key: value
+    for key, value in {
+        "temperature": env_optional_float("DEFAULT_REQUEST_TEMPERATURE"),
+        "top_p": env_optional_float("DEFAULT_REQUEST_TOP_P"),
+        "top_k": env_optional_int("DEFAULT_REQUEST_TOP_K"),
+        "repetition_penalty": env_optional_float("DEFAULT_REQUEST_REPETITION_PENALTY"),
+        "max_tokens": env_optional_int("DEFAULT_REQUEST_MAX_TOKENS"),
+    }.items()
+    if value is not None
+}
 
 
 def normalize_backend(value: str) -> str:
@@ -207,7 +228,7 @@ def sticky_key(headers, body: bytes) -> str | None:
 
 
 def apply_request_defaults(path: str, headers, body: bytes) -> bytes:
-    if not DEFAULT_CHAT_TEMPLATE_THINKING:
+    if not DEFAULT_CHAT_TEMPLATE_THINKING and not DEFAULT_REQUEST_PARAMS:
         return body
     if not body or "/chat/completions" not in path:
         return body
@@ -224,14 +245,16 @@ def apply_request_defaults(path: str, headers, body: bytes) -> bytes:
     if not isinstance(payload, dict):
         return body
 
-    chat_template_kwargs = payload.get("chat_template_kwargs")
-    if chat_template_kwargs is None:
-        chat_template_kwargs = {}
-        payload["chat_template_kwargs"] = chat_template_kwargs
-    if not isinstance(chat_template_kwargs, dict):
-        return body
+    if DEFAULT_CHAT_TEMPLATE_THINKING:
+        chat_template_kwargs = payload.get("chat_template_kwargs")
+        if chat_template_kwargs is None:
+            chat_template_kwargs = {}
+            payload["chat_template_kwargs"] = chat_template_kwargs
+        if isinstance(chat_template_kwargs, dict):
+            chat_template_kwargs.setdefault("thinking", True)
 
-    chat_template_kwargs.setdefault("thinking", True)
+    for key, value in DEFAULT_REQUEST_PARAMS.items():
+        payload.setdefault(key, value)
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
