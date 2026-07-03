@@ -230,14 +230,15 @@ class RouterHandler(BaseHTTPRequestHandler):
         self.proxy()
 
     def proxy(self) -> None:
+        content_length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(content_length) if content_length else b""
+
         if ROUTER_API_KEY:
             expected = f"Bearer {ROUTER_API_KEY}"
             if self.headers.get("authorization") != expected:
                 self.send_json(401, {"error": "unauthorized"})
                 return
 
-        content_length = int(self.headers.get("content-length") or 0)
-        body = self.rfile.read(content_length) if content_length else b""
         backend = STATE.choose(sticky_key(self.headers, body))
         if not backend:
             self.send_json(503, {"error": "no healthy GPU backend"})
