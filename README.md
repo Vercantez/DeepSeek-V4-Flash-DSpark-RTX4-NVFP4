@@ -1,4 +1,48 @@
-# DeepSeek V4 Flash DSpark C12 NVFP4 KV on 2x DGX Spark
+# DeepSeek V4 Flash DSpark NVFP4 KV Ports
+
+## AWS RTX PRO 6000 x4 Port
+
+This fork includes an experimental x86 RTX PRO 6000 Blackwell port for serving
+`deepseek-ai/DeepSeek-V4-Flash-DSpark` with DSpark speculative decoding and the
+`nvfp4_ds_mla` KV-cache path on an AWS `g7e.24xlarge` host.
+
+The DGX Spark runtime image from the original recipe is ARM64 and does not run
+directly on the AWS x86 RTX host. The RTX path therefore builds a small patch
+layer on top of the x86 vLLM runtime:
+
+```bash
+docker build -f recipe/rtx4/Dockerfile.nvfp4-port \
+  -t vllm-dspark-runtime:rtx4-nvfp4-port-v3 .
+cp .env.rtx4.example .env.rtx4
+./prepare-dspark-model-cache-rtx4.sh
+./start-deepseek-v4-flash-dspark-rtx4.sh
+```
+
+Validated AWS profile:
+
+- instance: `g7e.24xlarge`, 4x RTX PRO 6000 Blackwell, ~96 GiB each
+- tensor parallelism: `4`
+- attention backend: `FLASHINFER_MLA_SPARSE_DSV4`
+- backend profile: `lucifer-cutlass`
+- KV cache dtype: `nvfp4_ds_mla`
+- speculative decoding: DSpark, `num_speculative_tokens=5`
+- `max_model_len=262144`
+- `max_num_seqs=64`
+- `max_num_batched_tokens=8192`
+
+Best observed benchmark in this port was `3341.2 tok/s` aggregate at `64`
+concurrent streams. The more practical service point in the current benchmark
+was around `48` concurrent streams: `3268.7 tok/s` aggregate with about
+`68 tok/s` per stream. See:
+
+- `benchmarks/results/2026-07-03-rtx4-nvfp4-dspark-v3.md`
+- `benchmarks/results/2026-07-03-rtx4-nvfp4-concurrency-sweep.md`
+
+The RTX patch is still experimental. It has passed boot, smoke, and concurrency
+benchmarks, but it needs longer correctness and latency soak testing before use
+as a production service baseline.
+
+## DGX Spark C12 NVFP4 KV
 
 Self-contained two-node DGX Spark recipe for serving `DeepSeek-V4-Flash-DSpark`
 with vLLM TP=2, DSpark speculative decoding, and a 1M-token max model length

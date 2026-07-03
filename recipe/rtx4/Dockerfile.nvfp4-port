@@ -1,0 +1,120 @@
+FROM voipmonitor/vllm:eldritch-enlightenment-v2226f26-b12x15cd38c-cu132-20260629
+
+RUN /opt/venv/bin/python - <<'PY'
+from pathlib import Path
+
+root = Path('/opt/venv/lib/python3.12/site-packages/vllm')
+
+def replace(path: str, old: str, new: str) -> None:
+    p = root / path
+    text = p.read_text()
+    if new in text:
+        return
+    if old not in text:
+        raise SystemExit(f'missing patch anchor in {p}: {old!r}')
+    p.write_text(text.replace(old, new, 1))
+
+replace(
+    'config/cache.py',
+    '    "fp8_ds_mla",\n    "turboquant_k8v4",',
+    '    "fp8_ds_mla",\n    "nvfp4_ds_mla",\n    "turboquant_k8v4",',
+)
+
+replace(
+    'utils/torch_utils.py',
+    '    "fp8_ds_mla": torch.uint8,\n    "turboquant_k8v4": torch.uint8,',
+    '    "fp8_ds_mla": torch.uint8,\n    "nvfp4_ds_mla": torch.uint8,\n    "turboquant_k8v4": torch.uint8,',
+)
+
+replace(
+    'utils/torch_utils.py',
+    '        or kv_cache_dtype == "nvfp4"\n',
+    '        or kv_cache_dtype == "nvfp4"\n        or kv_cache_dtype == "nvfp4_ds_mla"\n',
+)
+
+replace(
+    'v1/kv_cache_interface.py',
+    '    if kv_cache_dtype == "nvfp4":\n        return KVQuantMode.NVFP4\n',
+    '    if kv_cache_dtype == "nvfp4":\n        return KVQuantMode.NVFP4\n    if kv_cache_dtype == "nvfp4_ds_mla":\n        return KVQuantMode.NVFP4\n',
+)
+
+replace(
+    'v1/kv_cache_interface.py',
+    '        if self.cache_dtype_str == "fp8_ds_mla":\n            if self.model_version == "deepseek_v4":\n                # DeepseekV4: 448B NoPE + 128B RoPE + 8B fp8 scale = 584B per token.\n                # head_size stays semantic (512); bytes are determined here.\n                return self.storage_block_size * 584\n',
+    '        if self.cache_dtype_str == "nvfp4_ds_mla":\n            if self.model_version == "deepseek_v4":\n                # DeepSeek V4 padded NVFP4 probe: use the fp8_ds_mla 584-byte\n                # envelope first; if this boots, kernel/store correctness is next.\n                return self.storage_block_size * 584\n            return self.storage_block_size * 416\n        if self.cache_dtype_str == "fp8_ds_mla":\n            if self.model_version == "deepseek_v4":\n                # DeepseekV4: 448B NoPE + 128B RoPE + 8B fp8 scale = 584B per token.\n                # head_size stays semantic (512); bytes are determined here.\n                return self.storage_block_size * 584\n',
+)
+
+replace(
+    'v1/kv_cache_interface.py',
+    '        if self.model_version == "deepseek_v4" and self.cache_dtype_str == "fp8_ds_mla":\n            # DeepseekV4 FlashMLA: 448B NoPE + 128B RoPE + 8B fp8 scale = 584B\n            # per token. FlashInfer\'s contiguous bf16/fp8 cache falls through to\n            # the element-size formula below.\n            return self.storage_block_size * 584\n',
+    '        if self.model_version == "deepseek_v4" and self.cache_dtype_str in (\n            "fp8_ds_mla",\n            "nvfp4_ds_mla",\n        ):\n            # DeepseekV4 FlashMLA/FlashInfer sparse MLA padded layout.\n            return self.storage_block_size * 584\n',
+)
+
+replace(
+    'models/deepseek_v4/attention.py',
+    '    if use_fp8_ds_mla_layout:\n        # fp8_ds_mla block format: UE8M0 block-scaled fp8 packed as uint8.\n        assert kv_cache_dtype.startswith("fp8"), (\n            f"DeepseekV4 fp8_ds_mla layout only supports fp8 kv-cache, "\n            f"got {kv_cache_dtype}"\n        )\n        if kv_cache_dtype != "fp8_ds_mla":\n            if cache_config is not None:\n                cache_config.cache_dtype = "fp8_ds_mla"\n            kv_cache_dtype = "fp8_ds_mla"\n            logger.info_once("Using DeepSeek\'s fp8_ds_mla KV cache format.")\n        return kv_cache_dtype, torch.uint8\n',
+    '    if use_fp8_ds_mla_layout:\n        # fp8_ds_mla and nvfp4_ds_mla are packed uint8 MLA layouts.\n        if kv_cache_dtype in ("nvfp4", "nvfp4_ds_mla"):\n            if cache_config is not None:\n                cache_config.cache_dtype = "nvfp4_ds_mla"\n            logger.info_once("Using probe DeepSeek V4 nvfp4_ds_mla KV cache format.")\n            return "nvfp4_ds_mla", torch.uint8\n        assert kv_cache_dtype.startswith("fp8"), (\n            f"DeepseekV4 fp8_ds_mla layout only supports fp8/nvfp4 kv-cache, "\n            f"got {kv_cache_dtype}"\n        )\n        if kv_cache_dtype != "fp8_ds_mla":\n            if cache_config is not None:\n                cache_config.cache_dtype = "fp8_ds_mla"\n            kv_cache_dtype = "fp8_ds_mla"\n            logger.info_once("Using DeepSeek\'s fp8_ds_mla KV cache format.")\n        return kv_cache_dtype, torch.uint8\n',
+)
+
+replace(
+    'models/deepseek_v4/attention.py',
+    '        uses_fp8_ds_mla_layout = self.kv_cache_dtype == "fp8_ds_mla"\n',
+    '        uses_fp8_ds_mla_layout = self.kv_cache_dtype in ("fp8_ds_mla", "nvfp4_ds_mla")\n',
+)
+
+replace(
+    'models/deepseek_v4/attention.py',
+    '            alignment=576 if uses_fp8_ds_mla_layout else None,\n',
+    '            alignment=584 if uses_fp8_ds_mla_layout else None,\n',
+)
+
+replace(
+    'v1/attention/backends/mla/sparse_swa.py',
+    '        uses_fp8_ds_mla_layout = self.cache_config.cache_dtype == "fp8_ds_mla"\n',
+    '        uses_fp8_ds_mla_layout = self.cache_config.cache_dtype in ("fp8_ds_mla", "nvfp4_ds_mla")\n',
+)
+
+replace(
+    'v1/attention/backends/mla/sparse_swa.py',
+    '            alignment=576 if uses_fp8_ds_mla_layout else None,\n',
+    '            alignment=584 if uses_fp8_ds_mla_layout else None,\n',
+)
+
+replace(
+    'v1/attention/backends/mla/sparse_swa.py',
+    '        if cache_dtype_str == "fp8_ds_mla":\n',
+    '        if cache_dtype_str in ("fp8_ds_mla", "nvfp4_ds_mla"):\n',
+)
+
+replace(
+    'models/deepseek_v4/sparse_mla.py',
+    '        if cache_dtype_str == "fp8_ds_mla":\n',
+    '        if cache_dtype_str in ("fp8_ds_mla", "nvfp4_ds_mla"):\n',
+)
+
+replace(
+    'config/vllm.py',
+    '        if self.cache_config.cache_dtype == "nvfp4" and self.model_config.use_mla:\n            raise ValueError(\n                "nvfp4 KV cache is not supported with MLA (Multi-head Latent "\n                "Attention) backends. Please use a different --kv-cache-dtype "\n                "(e.g., \'fp8\' or \'auto\') for MLA models such as DeepSeek."\n            )\n',
+    '        if self.cache_config.cache_dtype == "nvfp4" and self.model_config.use_mla:\n            # DeepSeek V4 resolves nvfp4 to nvfp4_ds_mla in its attention layer.\n            # Other MLA models still need their own layout-specific path.\n            if not self.model_config.is_deepseek_v4:\n                raise ValueError(\n                    "nvfp4 KV cache is not supported with MLA (Multi-head Latent "\n                    "Attention) backends unless the model has an explicit layout. "\n                    "Use fp8/auto or a model-specific nvfp4 MLA dtype."\n                )\n',
+)
+
+print('RTX4 DeepSeek V4 nvfp4_ds_mla bridge patches applied')
+PY
+
+RUN /opt/venv/bin/python - <<'PY'
+from types import SimpleNamespace
+from typing import get_args
+import torch
+from vllm.config.cache import CacheDType
+from vllm.models.deepseek_v4.attention import _resolve_dsv4_kv_cache_dtype
+from vllm.v1.kv_cache_interface import MLAAttentionSpec, get_kv_quant_mode
+
+assert 'nvfp4_ds_mla' in get_args(CacheDType)
+cfg = SimpleNamespace(cache_dtype='nvfp4')
+resolved, dtype = _resolve_dsv4_kv_cache_dtype(True, 'nvfp4', cfg)
+assert (resolved, dtype, cfg.cache_dtype) == ('nvfp4_ds_mla', torch.uint8, 'nvfp4_ds_mla')
+assert get_kv_quant_mode('nvfp4_ds_mla').is_nvfp4
+spec = MLAAttentionSpec(block_size=256, num_kv_heads=1, head_size=512, dtype=torch.uint8, compress_ratio=2, cache_dtype_str='nvfp4_ds_mla', model_version='deepseek_v4')
+assert spec.real_page_size_bytes == 128 * 584
+print('RTX4 nvfp4_ds_mla python patch ok')
+PY

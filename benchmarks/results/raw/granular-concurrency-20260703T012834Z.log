@@ -1,0 +1,61 @@
+target http://127.0.0.1:8000  model deepseek-v4-flash-dspark
+warmup...
+warmup done
+=== concurrency 1 ===
+  concurrency=1: per-stream decode [72.1] tok/s | server-agg 302.4 tok/s | acceptance 0.714
+  concurrency=1: per-stream decode [72.0] tok/s | server-agg 304.3 tok/s | acceptance 0.714
+=== concurrency 2 ===
+  concurrency=2: per-stream decode [65.2, 65.2] tok/s | server-agg 511.7 tok/s | acceptance 0.669
+  concurrency=2: per-stream decode [58.2, 60.0] tok/s | server-agg 433.6 tok/s | acceptance 0.637
+=== concurrency 3 ===
+  concurrency=3: per-stream decode [52.5, 50.6, 54.0] tok/s | server-agg 586.5 tok/s | acceptance 0.677
+  concurrency=3: per-stream decode [51.3, 52.4, 53.0] tok/s | server-agg 576.7 tok/s | acceptance 0.644
+=== concurrency 4 ===
+  concurrency=4: per-stream decode [47.9, 49.6, 49.3, 50.4] tok/s | server-agg 726.4 tok/s | acceptance 0.666
+  concurrency=4: per-stream decode [48.8, 49.6, 49.6, 50.0] tok/s | server-agg 712.1 tok/s | acceptance 0.631
+=== concurrency 6 ===
+  concurrency=6: per-stream decode [41.0, 42.8, 43.0, 42.0, 42.0, 42.1] tok/s | server-agg 923.6 tok/s | acceptance 0.649
+  concurrency=6: per-stream decode [42.7, 42.1, 42.8, 42.3, 42.3, 42.3] tok/s | server-agg 912.4 tok/s | acceptance 0.633
+=== concurrency 8 ===
+  concurrency=8: per-stream decode [39.4, 40.2, 40.3, 40.2, 40.2, 40.8, 40.2, 40.3] tok/s | server-agg 1265.5 tok/s | acceptance 0.699
+  concurrency=8: per-stream decode [39.8, 40.4, 40.4, 40.4, 40.4, 40.8, 40.5, 40.4] tok/s | server-agg 1265.1 tok/s | acceptance 0.695
+=== concurrency 12 ===
+  concurrency=12: per-stream decode [32.7, 34.8, 35.0, 34.8, 36.0, 34.8, 35.0, 34.8, 35.5, 34.9, 34.9, 34.8] tok/s | server-agg 1547.0 tok/s | acceptance 0.688
+  concurrency=12: per-stream decode [33.7, 35.0, 35.1, 35.0, 36.1, 35.1, 35.4, 35.1, 35.0, 35.1, 35.1, 35.0] tok/s | server-agg 1533.4 tok/s | acceptance 0.675
+=== concurrency 16 ===
+  concurrency=16: per-stream decode [24.7, 25.1, 30.0, 29.6, 29.8, 29.3, 29.4, 29.3, 30.8, 29.3, 29.5, 29.4, 29.4, 29.4, 29.3, 29.6] tok/s | server-agg 1559.4 tok/s | acceptance 0.687
+  concurrency=16: per-stream decode [29.9, 29.8, 28.3, 30.0, 30.6, 30.6, 29.7, 30.1, 30.3, 29.8, 29.7, 29.7, 29.7, 29.8, 29.7, 30.2] tok/s | server-agg 1691.2 tok/s | acceptance 0.644
+=== concurrency 24 ===
+  concurrency=24: per-stream decode [25.8, 26.3, 26.2, 26.6, 27.9, 26.1, 26.1, 26.7, 26.3, 26.2, 26.7, 26.7, 26.1, 26.2, 26.1, 26.2, 26.2, 26.2, 26.1, 26.1, 26.1, 26.3, 26.2, 26.1] tok/s | server-agg 2263.9 tok/s | acceptance 0.662
+  concurrency=24: per-stream decode [25.1, 26.3, 26.1, 26.6, 28.0, 26.1, 26.1, 26.3, 26.8, 26.1, 26.6, 26.4, 26.1, 26.2, 26.0, 26.1, 26.2, 26.1, 26.1, 26.1, 26.1, 26.3, 26.1, 26.1] tok/s | server-agg 2275.3 tok/s | acceptance 0.669
+=== concurrency 32 ===
+  concurrency=32: per-stream decode [22.1, 22.6, 22.6, 22.6, 22.6, 22.6, 22.6, 22.7, 23.0, 22.6, 22.6, 22.6, 22.6, 22.6, 22.6, 22.7, 22.6, 22.6, 22.7, 22.6, 22.7, 22.6, 22.7, 22.7, 22.6, 22.9, 22.6, 22.6, 22.8, 22.6, 23.0, 22.7] tok/s | server-agg 2868.1 tok/s | acceptance 0.704
+  concurrency=32: per-stream decode [22.1, 22.6, 22.6, 22.6, 22.7, 22.6, 22.7, 22.7, 23.1, 22.7, 22.6, 22.6, 22.6, 22.6, 22.7, 22.7, 22.6, 22.6, 22.8, 22.6, 22.6, 22.7, 22.7, 22.6, 22.7, 22.9, 22.7, 22.6, 22.9, 22.6, 23.1, 22.7] tok/s | server-agg 2880.1 tok/s | acceptance 0.704
+=== concurrency 40 ===
+  concurrency=40: per-stream decode [19.3, 20.3, 19.4, 19.9, 19.5, 19.4, 19.3, 20.4, 19.6, 19.4, 19.5, 20.4, 19.4, 19.8, 19.4, 19.4, 19.4, 20.3, 19.5, 19.4, 20.6, 20.6, 19.4, 21.0, 19.4, 19.9, 19.4, 19.4, 19.4, 19.4, 20.1, 20.4, 19.4, 19.4, 19.4, 19.3, 19.3, 19.6, 19.4, 19.4] tok/s | server-agg 2855.8 tok/s | acceptance 0.656
+  concurrency=40: per-stream decode [18.9, 19.4, 20.6, 19.9, 19.5, 19.4, 19.4, 19.6, 20.4, 19.5, 19.5, 20.4, 19.4, 19.9, 19.4, 19.4, 19.5, 20.4, 19.5, 19.5, 20.3, 20.5, 21.2, 19.4, 20.0, 19.4, 19.5, 19.4, 19.4, 19.5, 20.3, 20.6, 19.4, 19.4, 19.4, 19.4, 19.4, 19.4, 19.6, 19.5] tok/s | server-agg 2876.1 tok/s | acceptance 0.661
+=== concurrency 48 ===
+  concurrency=48: per-stream decode [17.3, 17.8, 17.8, 17.9, 17.9, 17.9, 17.8, 17.8, 17.8, 17.7, 18.0, 18.0, 17.7, 17.8, 17.8, 17.8, 17.9, 17.9, 20.1, 17.8, 17.8, 18.5, 18.0, 18.0, 19.1, 17.8, 17.8, 17.7, 17.9, 17.9, 17.8, 17.8, 17.8, 17.7, 18.0, 18.0, 17.8, 18.2, 17.8, 17.8, 17.9, 17.9, 17.8, 17.8, 17.8, 17.8, 18.0, 18.0] tok/s | server-agg 3240.8 tok/s | acceptance 0.685
+  concurrency=48: per-stream decode [17.4, 17.8, 17.8, 18.0, 18.0, 18.0, 17.8, 17.8, 17.8, 17.8, 18.1, 18.1, 17.8, 17.8, 17.8, 17.8, 18.0, 18.0, 19.8, 17.8, 17.8, 18.7, 18.1, 18.1, 18.9, 17.8, 17.8, 17.8, 18.0, 18.0, 17.8, 17.8, 17.8, 18.1, 17.8, 18.1, 18.2, 17.8, 18.0, 17.8, 17.9, 18.0, 17.9, 17.8, 17.8, 17.8, 18.1, 18.1] tok/s | server-agg 3268.7 tok/s | acceptance 0.686
+=== concurrency 56 ===
+  concurrency=56: per-stream decode [15.4, 15.4, 16.2, 15.4, 15.7, 15.7, 15.4, 15.2, 15.2, 15.2, 15.2, 15.2, 15.3, 15.9, 15.3, 15.3, 15.8, 15.7, 15.2, 15.2, 15.5, 15.2, 15.2, 15.3, 15.2, 16.7, 16.5, 15.2, 15.2, 15.2, 15.2, 15.4, 15.5, 15.2, 15.3, 16.7, 15.2, 15.2, 15.2, 15.3, 15.4, 15.3, 15.6, 15.4, 15.4, 15.8, 15.2, 15.8, 15.9, 15.6, 17.1, 15.9, 15.6, 15.6, 15.6, 16.1] tok/s | server-agg 3212.0 tok/s | acceptance 0.658
+  concurrency=56: per-stream decode [15.0, 15.4, 15.4, 15.2, 15.2, 15.2, 15.6, 15.4, 15.2, 15.3, 15.3, 15.6, 15.2, 15.2, 15.3, 15.2, 15.3, 15.2, 15.5, 15.5, 16.3, 15.2, 15.7, 15.2, 15.2, 15.2, 15.6, 15.6, 15.3, 15.2, 15.2, 15.2, 15.2, 15.4, 15.2, 15.2, 15.2, 15.2, 15.2, 15.2, 15.2, 15.2, 16.8, 15.2, 16.6, 15.5, 15.5, 16.1, 15.6, 15.5, 15.6, 16.4, 16.1, 16.4, 17.7, 16.0] tok/s | server-agg 3168.1 tok/s | acceptance 0.659
+=== concurrency 64 ===
+  concurrency=64: per-stream decode [13.7, 13.7, 13.7, 14.7, 13.8, 13.8, 13.7, 13.7, 13.9, 14.7, 14.7, 13.8, 14.0, 13.7, 13.7, 13.9, 13.8, 13.7, 13.7, 13.8, 13.8, 13.8, 13.7, 13.9, 13.7, 13.7, 13.8, 13.8, 13.8, 13.8, 14.4, 14.6, 13.9, 13.7, 13.8, 13.7, 14.2, 14.5, 13.7, 14.5, 13.7, 13.8, 13.9, 13.9, 15.0, 14.0, 14.1, 14.3, 14.1, 14.1, 14.0, 14.5, 14.0, 14.4, 14.0, 14.2, 15.0, 15.2, 14.0, 14.1, 15.2, 14.3, 14.0, 14.5] tok/s | server-agg 3341.2 tok/s | acceptance 0.659
+  concurrency=64: per-stream decode [13.1, 14.0, 14.0, 13.4, 13.5, 14.0, 13.5, 13.5, 13.2, 13.2, 13.4, 13.5, 13.3, 13.4, 14.1, 13.7, 13.2, 13.2, 13.2, 13.5, 13.2, 13.2, 13.5, 13.5, 13.2, 14.9, 13.4, 13.5, 13.2, 13.2, 13.5, 13.4, 13.2, 13.2, 13.2, 13.2, 14.3, 13.2, 13.2, 13.9, 13.4, 13.2, 13.8, 13.5, 13.5, 15.6, 13.6, 13.6, 14.1, 13.9, 13.6, 13.5, 13.5, 13.5, 13.5, 13.5, 13.5, 14.5, 14.0, 13.9, 14.2, 15.5, 14.1, 14.6] tok/s | server-agg 3177.9 tok/s | acceptance 0.659
+
+=== AGGREGATE tok/s curve (best of 2) ===
+  x1 : 304.3 tok/s agg  (304.3/stream)
+  x2 : 511.7 tok/s agg  (255.9/stream)
+  x3 : 586.5 tok/s agg  (195.5/stream)
+  x4 : 726.4 tok/s agg  (181.6/stream)
+  x6 : 923.6 tok/s agg  (153.9/stream)
+  x8 : 1265.5 tok/s agg  (158.2/stream)
+  x12: 1547.0 tok/s agg  (128.9/stream)
+  x16: 1691.2 tok/s agg  (105.7/stream)
+  x24: 2275.3 tok/s agg  (94.8/stream)
+  x32: 2880.1 tok/s agg  (90.0/stream)
+  x40: 2876.1 tok/s agg  (71.9/stream)
+  x48: 3268.7 tok/s agg  (68.1/stream)
+  x56: 3212.0 tok/s agg  (57.4/stream)
+  x64: 3341.2 tok/s agg  (52.2/stream)
