@@ -5,6 +5,7 @@ set -euo pipefail
 : "${AWS_ASG_NAME:=deepseek-rtx4-spot-asg}"
 : "${ROUTER_PORT:=8080}"
 : "${BACKEND_PORT:=8000}"
+: "${DEFAULT_CHAT_TEMPLATE_THINKING:=false}"
 : "${ROUTER_API_KEY:?Set ROUTER_API_KEY before installing the router}"
 
 install -d -m 0755 /opt/deepseek-router
@@ -20,6 +21,7 @@ DISCOVERY_INTERVAL=15
 HEALTH_TIMEOUT=3
 REQUEST_TIMEOUT=900
 ROUTER_API_KEY=$ROUTER_API_KEY
+DEFAULT_CHAT_TEMPLATE_THINKING=$DEFAULT_CHAT_TEMPLATE_THINKING
 EOF
 chmod 0600 /etc/deepseek-router.env
 

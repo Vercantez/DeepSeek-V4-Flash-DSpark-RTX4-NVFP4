@@ -74,6 +74,13 @@ def env_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 BACKEND_PORT = env_int("BACKEND_PORT", 8000)
 DISCOVERY_INTERVAL = env_int("DISCOVERY_INTERVAL", 15)
 HEALTH_TIMEOUT = env_int("HEALTH_TIMEOUT", 3)
@@ -81,6 +88,7 @@ REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT", 900)
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
 AWS_ASG_NAME = os.environ.get("AWS_ASG_NAME", "")
 ROUTER_API_KEY = os.environ.get("ROUTER_API_KEY", "")
+DEFAULT_CHAT_TEMPLATE_THINKING = env_bool("DEFAULT_CHAT_TEMPLATE_THINKING", False)
 
 
 def normalize_backend(value: str) -> str:
@@ -198,6 +206,35 @@ def sticky_key(headers, body: bytes) -> str | None:
     return None
 
 
+def apply_request_defaults(path: str, headers, body: bytes) -> bytes:
+    if not DEFAULT_CHAT_TEMPLATE_THINKING:
+        return body
+    if not body or "/chat/completions" not in path:
+        return body
+
+    content_type = headers.get("content-type", "")
+    if "application/json" not in content_type.lower():
+        return body
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body
+
+    if not isinstance(payload, dict):
+        return body
+
+    chat_template_kwargs = payload.get("chat_template_kwargs")
+    if chat_template_kwargs is None:
+        chat_template_kwargs = {}
+        payload["chat_template_kwargs"] = chat_template_kwargs
+    if not isinstance(chat_template_kwargs, dict):
+        return body
+
+    chat_template_kwargs.setdefault("thinking", True)
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
 class RouterHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -232,6 +269,7 @@ class RouterHandler(BaseHTTPRequestHandler):
     def proxy(self) -> None:
         content_length = int(self.headers.get("content-length") or 0)
         body = self.rfile.read(content_length) if content_length else b""
+        body = apply_request_defaults(self.path, self.headers, body)
 
         if ROUTER_API_KEY:
             expected = f"Bearer {ROUTER_API_KEY}"
@@ -251,9 +289,12 @@ class RouterHandler(BaseHTTPRequestHandler):
         headers = {
             key: value
             for key, value in self.headers.items()
-            if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "host"
+            if key.lower() not in HOP_BY_HOP_HEADERS
+            and key.lower() not in {"host", "content-length"}
         }
         headers["host"] = parsed.netloc
+        if body:
+            headers["content-length"] = str(len(body))
         headers["x-forwarded-for"] = self.client_address[0]
         headers["x-routed-backend"] = backend
 
