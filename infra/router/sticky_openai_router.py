@@ -261,18 +261,30 @@ class RouterHandler(BaseHTTPRequestHandler):
             conn.request(self.command, self.path, body=body, headers=headers)
             response = conn.getresponse()
             self.send_response(response.status, response.reason)
-            for key, value in response.getheaders():
+            response_headers = response.getheaders()
+            content_type = ""
+            for key, value in response_headers:
                 if key.lower() not in HOP_BY_HOP_HEADERS:
                     self.send_header(key, value)
+                if key.lower() == "content-type":
+                    content_type = value.lower()
             self.send_header("x-routed-backend", backend)
             self.send_header("connection", "close")
             self.end_headers()
-            while True:
-                chunk = response.read(65536)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            if content_type.startswith("text/event-stream"):
+                while True:
+                    line = response.readline()
+                    if not line:
+                        break
+                    self.wfile.write(line)
+                    self.wfile.flush()
+            else:
+                while True:
+                    chunk = response.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
         except BrokenPipeError:
             pass
         except Exception as exc:
