@@ -10,7 +10,7 @@ set -euo pipefail
 : "${DEFAULT_REQUEST_TOP_P:=1.0}"
 : "${DEFAULT_REQUEST_TOP_K:=}"
 : "${DEFAULT_REQUEST_REPETITION_PENALTY:=}"
-: "${DEFAULT_REQUEST_MAX_TOKENS:=8192}"
+: "${DEFAULT_REQUEST_MAX_TOKENS:=262144}"
 : "${ROUTER_API_KEY:?Set ROUTER_API_KEY before installing the router}"
 
 install -d -m 0755 /opt/deepseek-router
