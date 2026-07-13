@@ -108,7 +108,7 @@ if [ -n "$KV_OFFLOAD_GB" ]; then
     exit 2
   fi
   mkdir -p "$KV_OFFLOAD_DISK_DIR"
-  KV_TRANSFER_CONFIG="$(printf '{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"TieringOffloadingSpec\",\"cpu_bytes_to_use\":%s,\"block_size\":256,\"eviction_policy\":\"lru\",\"secondary_tiers\":[{\"type\":\"fs\",\"root_dir\":\"%s\",\"n_read_threads\":32,\"n_write_threads\":16}]}}' "$((KV_OFFLOAD_GB * 1024 * 1024 * 1024))" "$KV_OFFLOAD_DISK_DIR")"
+  KV_TRANSFER_CONFIG="$(printf '{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"TieringOffloadingSpec\",\"cpu_bytes_to_use\":%s,\"eviction_policy\":\"lru\",\"secondary_tiers\":[{\"type\":\"fs\",\"root_dir\":\"%s\",\"n_read_threads\":32,\"n_write_threads\":16}]}}' "$((KV_OFFLOAD_GB * 1024 * 1024 * 1024))" "$KV_OFFLOAD_DISK_DIR")"
   KV_OFFLOAD_ARGS=(
     --kv-offloading-size "$KV_OFFLOAD_GB"
     --kv-offloading-backend native
