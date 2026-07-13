@@ -31,6 +31,8 @@ fi
 : "${DSPARK_SAMPLE:=probabilistic}"
 : "${PREFIX_CACHE:=1}"
 : "${PULL_IMAGE:=0}"
+: "${KV_OFFLOAD_GB:=}"
+: "${KV_OFFLOAD_DISK_DIR:=}"
 
 mkdir -p \
   "$HF_CACHE" \
@@ -94,6 +96,21 @@ esac
 PREFIX_ARGS=(--enable-prefix-caching)
 if [ "$PREFIX_CACHE" != "1" ]; then
   PREFIX_ARGS=(--no-enable-prefix-caching)
+fi
+
+KV_OFFLOAD_ARGS=()
+if [ -n "$KV_OFFLOAD_GB" ]; then
+  if [ -z "$KV_OFFLOAD_DISK_DIR" ]; then
+    echo "KV_OFFLOAD_DISK_DIR is required when KV_OFFLOAD_GB is set" >&2
+    exit 2
+  fi
+  mkdir -p "$KV_OFFLOAD_DISK_DIR"
+  KV_TRANSFER_CONFIG="$(printf '{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"TieringOffloadingSpec\",\"cpu_bytes_to_use\":%s,\"block_size\":256,\"eviction_policy\":\"lru\",\"secondary_tiers\":[{\"type\":\"fs\",\"root_dir\":\"%s\",\"n_read_threads\":32,\"n_write_threads\":16}]}}' "$((KV_OFFLOAD_GB * 1024 * 1024 * 1024))" "$KV_OFFLOAD_DISK_DIR")"
+  KV_OFFLOAD_ARGS=(
+    --kv-offloading-size "$KV_OFFLOAD_GB"
+    --kv-offloading-backend native
+    --kv-transfer-config "$KV_TRANSFER_CONFIG"
+  )
 fi
 
 if [ "$PULL_IMAGE" = "1" ]; then
@@ -173,6 +190,7 @@ docker run -d \
   --generation-config vllm \
   --override-generation-config "$GENERATION_CONFIG_JSON" \
   --speculative-config "$SPECULATIVE_CONFIG" \
+  "${KV_OFFLOAD_ARGS[@]}" \
   "${BACKEND_ARGS[@]}" \
   "${PREFIX_ARGS[@]}"
 
