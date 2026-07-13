@@ -99,6 +99,8 @@ if [ "$PREFIX_CACHE" != "1" ]; then
 fi
 
 KV_OFFLOAD_ARGS=()
+KV_OFFLOAD_ENV=()
+CUDA_ALLOCATOR_ARGS=(-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True)
 if [ -n "$KV_OFFLOAD_GB" ]; then
   if [ -z "$KV_OFFLOAD_DISK_DIR" ]; then
     echo "KV_OFFLOAD_DISK_DIR is required when KV_OFFLOAD_GB is set" >&2
@@ -111,6 +113,10 @@ if [ -n "$KV_OFFLOAD_GB" ]; then
     --kv-offloading-backend native
     --kv-transfer-config "$KV_TRANSFER_CONFIG"
   )
+  # OffloadingConnector pins KV allocations, which is incompatible with
+  # PyTorch CUDA VMM's expandable segments allocator.
+  CUDA_ALLOCATOR_ARGS=()
+  KV_OFFLOAD_ENV=(-e PYTHONHASHSEED=0)
 fi
 
 if [ "$PULL_IMAGE" = "1" ]; then
@@ -136,7 +142,7 @@ docker run -d \
   -e NCCL_IB_DISABLE=1 \
   -e NCCL_P2P_LEVEL=SYS \
   -e NCCL_PROTO=LL,LL128,Simple \
-  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  "${CUDA_ALLOCATOR_ARGS[@]}" \
   -e VLLM_PREFIX_CACHE_RETENTION_INTERVAL=4096 \
   -e VLLM_USE_AOT_COMPILE=1 \
   -e VLLM_USE_MEGA_AOT_ARTIFACT=1 \
@@ -159,6 +165,7 @@ docker run -d \
   -e TORCHINDUCTOR_CACHE_DIR=/cache/huggingface/vllm-cache/torchinductor \
   -e TORCH_EXTENSIONS_DIR=/cache/huggingface/vllm-cache/torch_extensions \
   -e FLASHINFER_WORKSPACE_BASE=/cache/huggingface/vllm-cache/flashinfer \
+  "${KV_OFFLOAD_ENV[@]}" \
   "${BACKEND_ENV[@]}" \
   "$DSPARK_VLLM_IMAGE" \
   /bin/bash -lc 'unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS; exec vllm serve "$@"' \
