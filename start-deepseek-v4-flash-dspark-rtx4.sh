@@ -101,6 +101,7 @@ fi
 KV_OFFLOAD_ARGS=()
 KV_OFFLOAD_ENV=()
 CUDA_ALLOCATOR_ARGS=(-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True)
+SHM_SIZE=64g
 if [ -n "$KV_OFFLOAD_GB" ]; then
   if [ -z "$KV_OFFLOAD_DISK_DIR" ]; then
     echo "KV_OFFLOAD_DISK_DIR is required when KV_OFFLOAD_GB is set" >&2
@@ -117,6 +118,7 @@ if [ -n "$KV_OFFLOAD_GB" ]; then
   # PyTorch CUDA VMM's expandable segments allocator.
   CUDA_ALLOCATOR_ARGS=()
   KV_OFFLOAD_ENV=(-e PYTHONHASHSEED=0)
+  SHM_SIZE="$((KV_OFFLOAD_GB + 1))g"
 fi
 
 if [ "$PULL_IMAGE" = "1" ]; then
@@ -129,7 +131,7 @@ docker run -d \
   --gpus all \
   --runtime nvidia \
   --ipc host \
-  --shm-size 64g \
+  --shm-size "$SHM_SIZE" \
   --network host \
   --init \
   --ulimit memlock=-1 \
