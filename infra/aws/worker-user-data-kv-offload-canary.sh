@@ -26,6 +26,9 @@ chown ubuntu:ubuntu /opt/deepseek-cache
 
 repo=/opt/deepseek/mia-dspark-rtx4
 env_file="$repo/.env.rtx4"
+sudo -u ubuntu git -C "$repo" fetch --all --prune
+sudo -u ubuntu git -C "$repo" checkout main
+sudo -u ubuntu git -C "$repo" pull --ff-only
 test -f "$env_file"
 sed -i '/^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
 printf '%s\n' \
