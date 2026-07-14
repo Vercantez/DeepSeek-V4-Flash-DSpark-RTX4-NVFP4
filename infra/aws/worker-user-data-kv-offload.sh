@@ -23,12 +23,9 @@ fi
 mountpoint -q /opt/deepseek-cache || mount /opt/deepseek-cache
 chown ubuntu:ubuntu /opt/deepseek-cache
 
-snapshot_root=/opt/deepseek-cache/hf/hub/models--deepseek-ai--DeepSeek-V4-Flash-DSpark/snapshots
-snapshot_dir=$(find -L "$snapshot_root" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)
-if [ -n "$snapshot_dir" ]; then
-  find -L "$snapshot_dir" -type f \( -name '*.safetensors' -o -name '*.json' -o -name '*.model' \) -print0 \
-    | xargs -0 -r -n 1 -P 4 sh -c 'cat "$1" >/dev/null' sh
-fi
+# The launch template provisions a 300 MiB/s EBS initialization rate for this
+# snapshot-backed volume. Let vLLM load as soon as it can instead of blocking
+# cloud-init on a competing full checkpoint scan.
 
 repo=/opt/deepseek/mia-dspark-rtx4
 env_file="$repo/.env.rtx4"
