@@ -30,6 +30,8 @@ aws configure set default.s3.max_concurrent_requests 64
 aws configure set default.s3.max_queue_size 10000
 aws configure set default.s3.multipart_threshold 64MB
 aws configure set default.s3.multipart_chunksize 64MB
+aws configure set default.s3.preferred_transfer_client crt
+aws configure set default.s3.target_bandwidth 40Gb/s
 
 aws s3 cp "$MODEL_ARTIFACT_URI/artifact.json" "$ARTIFACT_DIR/artifact.json" --only-show-errors
 aws s3 cp "$MODEL_ARTIFACT_URI/manifest.sha256" "$MANIFEST" --only-show-errors
@@ -40,7 +42,8 @@ expected_manifest_hash=$(awk '{print $1}' "$MANIFEST.sha256")
 actual_manifest_hash=$(sha256sum "$MANIFEST" | awk '{print $1}')
 test "$actual_manifest_hash" = "$expected_manifest_hash"
 
-aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
+AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=8 \
+  aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
 
 cd "$HF_CACHE"
 verify_dir=$(mktemp -d "$ARTIFACT_DIR/manifest-parts.XXXXXX")
