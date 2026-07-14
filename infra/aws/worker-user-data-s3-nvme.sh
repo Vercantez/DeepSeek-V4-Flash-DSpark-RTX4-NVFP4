@@ -44,6 +44,7 @@ test "$actual_manifest_hash" = "$expected_manifest_hash"
 
 AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=8 \
   aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
+chown -R ubuntu:ubuntu "$HF_CACHE"
 
 cd "$HF_CACHE"
 verify_dir=$(mktemp -d "$ARTIFACT_DIR/manifest-parts.XXXXXX")
