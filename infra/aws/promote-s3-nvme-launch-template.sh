@@ -10,8 +10,9 @@ user_data_file=$(mktemp)
 template_data_file=$(mktemp)
 trap 'rm -f "$user_data_file" "$template_data_file"' EXIT
 
-printf 'MODEL_ARTIFACT_URI=%q\n' "$MODEL_ARTIFACT_URI" >"$user_data_file"
-cat "$script_dir/worker-user-data-s3-nvme.sh" >>"$user_data_file"
+head -n 1 "$script_dir/worker-user-data-s3-nvme.sh" >"$user_data_file"
+printf 'MODEL_ARTIFACT_URI=%q\n' "$MODEL_ARTIFACT_URI" >>"$user_data_file"
+tail -n +2 "$script_dir/worker-user-data-s3-nvme.sh" >>"$user_data_file"
 user_data=$(base64 <"$user_data_file" | tr -d '\n')
 
 aws ec2 describe-launch-template-versions \
