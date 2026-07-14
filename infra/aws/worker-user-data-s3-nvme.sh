@@ -9,6 +9,7 @@ NVME_ROOT=${NVME_ROOT:-/opt/dlami/nvme/deepseek-model}
 HF_CACHE="$NVME_ROOT/hf"
 ARTIFACT_DIR="$NVME_ROOT/artifact"
 MANIFEST="$ARTIFACT_DIR/manifest.sha256"
+VERIFY_JOBS=${VERIFY_JOBS:-8}
 
 if ! command -v aws >/dev/null; then
   apt-get update -y
@@ -40,7 +41,12 @@ sha256sum -c "$(basename "$MANIFEST").sha256"
 aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
 
 cd "$HF_CACHE"
-sha256sum -c "$MANIFEST"
+verify_dir=$(mktemp -d "$ARTIFACT_DIR/manifest-parts.XXXXXX")
+trap 'rm -rf "$verify_dir"' EXIT
+split --number="l/$VERIFY_JOBS" --additional-suffix=.sha256 "$MANIFEST" "$verify_dir/part-"
+find "$verify_dir" -type f -print0 | xargs -0 -r -n 1 -P "$VERIFY_JOBS" sha256sum --quiet -c
+rm -rf "$verify_dir"
+trap - EXIT
 
 model_rel=$(sed -n 's/.*"model_rel":"\\([^"]*\\)".*/\\1/p' "$ARTIFACT_DIR/artifact.json")
 test -n "$model_rel" && test "$model_rel" != null
