@@ -56,7 +56,11 @@ trap - EXIT
 
 model_rel=$(sed -n 's/.*"model_rel":"\\([^"]*\\)".*/\\1/p' "$ARTIFACT_DIR/artifact.json")
 test -n "$model_rel" && test "$model_rel" != null
-test -d "$HF_CACHE/$model_rel"
+model_dir_rel="$model_rel"
+if [ ! -f "$HF_CACHE/$model_dir_rel/config.json" ]; then
+  model_dir_rel=$(find "$HF_CACHE/$model_rel" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/config.json' \; -print -quit | sed "s#^$HF_CACHE/##")
+fi
+test -n "$model_dir_rel" && test -f "$HF_CACHE/$model_dir_rel/config.json"
 
 repo=/opt/deepseek/mia-dspark-rtx4
 env_file="$repo/.env.rtx4"
@@ -67,7 +71,7 @@ sudo -u ubuntu git -C "$repo" pull --ff-only
 sed -i '/^HF_CACHE=/d; /^MODEL_DIR=/d; /^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
 printf '%s\n' \
   "HF_CACHE=$HF_CACHE" \
-  "MODEL_DIR=/cache/huggingface/$model_rel" \
+  "MODEL_DIR=/cache/huggingface/$model_dir_rel" \
   'KV_OFFLOAD_GB=256' \
   'KV_OFFLOAD_DISK_DIR=/opt/dlami/nvme/kv-offload' >>"$env_file"
 install -d -o ubuntu -g ubuntu /opt/dlami/nvme/kv-offload
