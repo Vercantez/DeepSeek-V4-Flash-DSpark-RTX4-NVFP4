@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${MODEL_ARTIFACT_URI:?Set the regional S3 release URI}"
+
+systemctl stop deepseek-rtx4.service 2>/dev/null || true
+
+NVME_ROOT=${NVME_ROOT:-/opt/dlami/nvme/deepseek-model}
+HF_CACHE="$NVME_ROOT/hf"
+ARTIFACT_DIR="$NVME_ROOT/artifact"
+MANIFEST="$ARTIFACT_DIR/manifest.sha256"
+
+if ! command -v aws >/dev/null; then
+  apt-get update -y
+  apt-get install -y curl unzip
+  curl --fail --location --silent --show-error \
+    https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
+    --output /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install --update
+fi
+
+mkdir -p "$HF_CACHE" "$ARTIFACT_DIR"
+chown -R ubuntu:ubuntu "$NVME_ROOT"
+
+# The cache is immutable per release. High concurrency matters because the
+# model is stored as independent safetensor shards rather than one archive.
+aws configure set default.s3.max_concurrent_requests 64
+aws configure set default.s3.max_queue_size 10000
+aws configure set default.s3.multipart_threshold 64MB
+aws configure set default.s3.multipart_chunksize 64MB
+
+aws s3 cp "$MODEL_ARTIFACT_URI/artifact.json" "$ARTIFACT_DIR/artifact.json" --only-show-errors
+aws s3 cp "$MODEL_ARTIFACT_URI/manifest.sha256" "$MANIFEST" --only-show-errors
+aws s3 cp "$MODEL_ARTIFACT_URI/manifest.sha256.sha256" "$MANIFEST.sha256" --only-show-errors
+
+cd "$ARTIFACT_DIR"
+sha256sum -c "$(basename "$MANIFEST").sha256"
+
+aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
+
+cd "$HF_CACHE"
+sha256sum -c "$MANIFEST"
+
+model_rel=$(sed -n 's/.*"model_rel":"\\([^"]*\\)".*/\\1/p' "$ARTIFACT_DIR/artifact.json")
+test -n "$model_rel" && test "$model_rel" != null
+test -d "$HF_CACHE/$model_rel"
+
+repo=/opt/deepseek/mia-dspark-rtx4
+env_file="$repo/.env.rtx4"
+sudo -u ubuntu git -C "$repo" fetch --all --prune
+sudo -u ubuntu git -C "$repo" checkout main
+sudo -u ubuntu git -C "$repo" pull --ff-only
+
+sed -i '/^HF_CACHE=/d; /^MODEL_DIR=/d; /^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
+printf '%s\n' \
+  "HF_CACHE=$HF_CACHE" \
+  "MODEL_DIR=/cache/huggingface/$model_rel" \
+  'KV_OFFLOAD_GB=256' \
+  'KV_OFFLOAD_DISK_DIR=/opt/dlami/nvme/kv-offload' >>"$env_file"
+install -d -o ubuntu -g ubuntu /opt/dlami/nvme/kv-offload
+
+systemctl daemon-reload
+systemctl enable deepseek-rtx4.service
+systemctl start deepseek-rtx4.service
