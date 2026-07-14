@@ -71,10 +71,17 @@ sudo -u ubuntu git -C "$repo" pull --ff-only
 sed -i '/^HF_CACHE=/d; /^MODEL_DIR=/d; /^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
 printf '%s\n' \
   "HF_CACHE=$HF_CACHE" \
-  "MODEL_DIR=/cache/huggingface/$model_dir_rel" \
-  'KV_OFFLOAD_GB=256' \
-  'KV_OFFLOAD_DISK_DIR=/opt/dlami/nvme/kv-offload' >>"$env_file"
-install -d -o ubuntu -g ubuntu /opt/dlami/nvme/kv-offload
+  "MODEL_DIR=/cache/huggingface/$model_dir_rel" >>"$env_file"
+
+# Tiered KV offload is opt-in until the current vLLM runtime completes engine
+# initialization reliably with the large CPU and filesystem tiers enabled.
+if [ -n "${KV_OFFLOAD_GB:-}" ]; then
+  : "${KV_OFFLOAD_DISK_DIR:?Set KV_OFFLOAD_DISK_DIR when KV_OFFLOAD_GB is set}"
+  printf '%s\n' \
+    "KV_OFFLOAD_GB=$KV_OFFLOAD_GB" \
+    "KV_OFFLOAD_DISK_DIR=$KV_OFFLOAD_DISK_DIR" >>"$env_file"
+  install -d -o ubuntu -g ubuntu "$KV_OFFLOAD_DISK_DIR"
+fi
 
 systemctl daemon-reload
 systemctl enable deepseek-rtx4.service

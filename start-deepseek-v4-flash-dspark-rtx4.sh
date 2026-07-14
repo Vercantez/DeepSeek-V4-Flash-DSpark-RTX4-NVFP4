@@ -44,6 +44,18 @@ mkdir -p \
   "$HF_CACHE/vllm-cache/flashinfer" \
   "$HF_CACHE/vllm-cache/tmp"
 
+# S3/NVMe workers stage a Hugging Face snapshot under the cache mount. A stale
+# cache-root MODEL_DIR is not a model directory, so resolve the snapshot before
+# handing the path to vLLM.
+if [[ "${MODEL_DIR:-}" == /cache/huggingface/* ]] && \
+  [ ! -f "$HF_CACHE/${MODEL_DIR#/cache/huggingface/}/config.json" ]; then
+  staged_snapshot=$(find "$HF_CACHE/hub/models--deepseek-ai--DeepSeek-V4-Flash-DSpark/snapshots" \
+    -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/config.json' \; -print -quit 2>/dev/null || true)
+  if [ -n "$staged_snapshot" ]; then
+    MODEL_DIR="/cache/huggingface${staged_snapshot#"$HF_CACHE"}"
+  fi
+fi
+
 MODEL_ARG="${MODEL_DIR:-$DSPARK_MODEL}"
 SPECULATIVE_CONFIG="$(printf '{"model":"%s","method":"dspark","num_speculative_tokens":%s,"draft_sample_method":"%s"}' "$MODEL_ARG" "$MTP_NUM_TOKENS" "$DSPARK_SAMPLE")"
 GENERATION_CONFIG_JSON="$(printf '{"temperature":%s,"top_p":%s,"top_k":%s,"repetition_penalty":%s,"max_tokens":%s}' \
