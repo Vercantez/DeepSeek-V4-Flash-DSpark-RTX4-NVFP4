@@ -36,7 +36,9 @@ aws s3 cp "$MODEL_ARTIFACT_URI/manifest.sha256" "$MANIFEST" --only-show-errors
 aws s3 cp "$MODEL_ARTIFACT_URI/manifest.sha256.sha256" "$MANIFEST.sha256" --only-show-errors
 
 cd "$ARTIFACT_DIR"
-sha256sum -c "$(basename "$MANIFEST").sha256"
+expected_manifest_hash=$(awk '{print $1}' "$MANIFEST.sha256")
+actual_manifest_hash=$(sha256sum "$MANIFEST" | awk '{print $1}')
+test "$actual_manifest_hash" = "$expected_manifest_hash"
 
 aws s3 sync "$MODEL_ARTIFACT_URI/hf/" "$HF_CACHE/" --only-show-errors
 
