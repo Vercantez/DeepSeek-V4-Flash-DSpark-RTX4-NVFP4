@@ -30,6 +30,7 @@ fi
 : "${MTP_NUM_TOKENS:=5}"
 : "${DSPARK_SAMPLE:=probabilistic}"
 : "${PREFIX_CACHE:=1}"
+: "${SCHEDULING_POLICY:=priority}"
 : "${PULL_IMAGE:=0}"
 : "${KV_OFFLOAD_GB:=}"
 : "${KV_OFFLOAD_DISK_DIR:=}"
@@ -101,6 +102,14 @@ case "$BACKEND" in
     ;;
   *)
     echo "Unknown BACKEND=$BACKEND" >&2
+    exit 2
+    ;;
+esac
+
+case "$SCHEDULING_POLICY" in
+  fcfs|priority) ;;
+  *)
+    echo "SCHEDULING_POLICY must be fcfs or priority, got $SCHEDULING_POLICY" >&2
     exit 2
     ;;
 esac
@@ -197,6 +206,7 @@ docker run -d \
   --max-model-len "$MAX_MODEL_LEN" \
   --max-num-seqs "$MAX_NUM_SEQS" \
   --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+  --scheduling-policy "$SCHEDULING_POLICY" \
   --max-cudagraph-capture-size "$CUDA_GRAPH_CAPTURE_SIZE" \
   --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}' \
   --async-scheduling \
@@ -215,4 +225,4 @@ docker run -d \
   "${BACKEND_ARGS[@]}" \
   "${PREFIX_ARGS[@]}"
 
-echo "$CONTAINER_NAME $SERVED_MODEL_NAME $BACKEND TP=$TP_SIZE GPUS=$GPUS PORT=$PORT KV=$KV_CACHE_DTYPE"
+echo "$CONTAINER_NAME $SERVED_MODEL_NAME $BACKEND TP=$TP_SIZE GPUS=$GPUS PORT=$PORT KV=$KV_CACHE_DTYPE SCHEDULER=$SCHEDULING_POLICY"
