@@ -31,6 +31,7 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+VLLM_PRIORITY_HEADER = "x-chiridion-vllm-priority"
 
 
 class BackendState:
@@ -95,8 +96,15 @@ BACKEND_PORT = env_int("BACKEND_PORT", 8000)
 DISCOVERY_INTERVAL = env_int("DISCOVERY_INTERVAL", 15)
 HEALTH_TIMEOUT = env_int("HEALTH_TIMEOUT", 3)
 REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT", 900)
+MODEL_ID = os.environ.get("MODEL_ID", "deepseek-v4-flash-dspark")
+MODEL_MAX_CONTEXT_TOKENS = env_int("MODEL_MAX_CONTEXT_TOKENS", 262_144)
+MODEL_WORKING_CONTEXT_TOKENS = env_int("MODEL_WORKING_CONTEXT_TOKENS", 220_000)
+MODEL_MAX_OUTPUT_TOKENS = env_int("MODEL_MAX_OUTPUT_TOKENS", 262_144)
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
 AWS_ASG_NAME = os.environ.get("AWS_ASG_NAME", "")
+# Comma-separated `region:auto-scaling-group` targets. This lets one router
+# keep rendezvous-hash affinity while discovering workers in multiple regions.
+AWS_ASG_TARGETS = os.environ.get("AWS_ASG_TARGETS", "")
 ROUTER_API_KEY = os.environ.get("ROUTER_API_KEY", "")
 DEFAULT_CHAT_TEMPLATE_THINKING = env_bool("DEFAULT_CHAT_TEMPLATE_THINKING", False)
 DEFAULT_REQUEST_PARAMS = {
@@ -110,6 +118,19 @@ DEFAULT_REQUEST_PARAMS = {
     }.items()
     if value is not None
 }
+# Undefined means transparent: preserve the caller's requested output budget
+# and let vLLM enforce prompt + output against the hard context limit.
+MAX_REQUEST_OUTPUT_TOKENS = env_optional_int("MAX_REQUEST_OUTPUT_TOKENS")
+DEFAULT_VLLM_PRIORITY = env_int("DEFAULT_VLLM_PRIORITY", 100)
+MIN_VLLM_PRIORITY = env_int("MIN_VLLM_PRIORITY", 0)
+MAX_VLLM_PRIORITY = env_int("MAX_VLLM_PRIORITY", 1_000)
+
+if MODEL_WORKING_CONTEXT_TOKENS > MODEL_MAX_CONTEXT_TOKENS:
+    raise ValueError("MODEL_WORKING_CONTEXT_TOKENS cannot exceed MODEL_MAX_CONTEXT_TOKENS")
+if MODEL_MAX_OUTPUT_TOKENS > MODEL_MAX_CONTEXT_TOKENS:
+    raise ValueError("MODEL_MAX_OUTPUT_TOKENS cannot exceed MODEL_MAX_CONTEXT_TOKENS")
+if MIN_VLLM_PRIORITY > MAX_VLLM_PRIORITY:
+    raise ValueError("MIN_VLLM_PRIORITY cannot exceed MAX_VLLM_PRIORITY")
 
 
 def normalize_backend(value: str) -> str:
@@ -128,8 +149,22 @@ def static_backends() -> list[str]:
     return [b for b in (normalize_backend(v) for v in raw.split(",")) if b]
 
 
-def discover_asg_backends() -> list[str]:
-    if not AWS_ASG_NAME:
+def asg_targets() -> list[tuple[str, str]]:
+    if AWS_ASG_TARGETS:
+        targets: list[tuple[str, str]] = []
+        for value in AWS_ASG_TARGETS.split(","):
+            region, separator, asg_name = value.strip().partition(":")
+            if not separator or not region or not asg_name:
+                raise ValueError(
+                    "AWS_ASG_TARGETS entries must use region:auto-scaling-group"
+                )
+            targets.append((region, asg_name))
+        return targets
+    return [(AWS_REGION, AWS_ASG_NAME)] if AWS_ASG_NAME else []
+
+
+def discover_asg_backends(region: str, asg_name: str) -> list[str]:
+    if not asg_name:
         return []
 
     asg_cmd = [
@@ -137,9 +172,9 @@ def discover_asg_backends() -> list[str]:
         "autoscaling",
         "describe-auto-scaling-groups",
         "--region",
-        AWS_REGION,
+        region,
         "--auto-scaling-group-names",
-        AWS_ASG_NAME,
+        asg_name,
         "--query",
         "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId",
         "--output",
@@ -158,7 +193,7 @@ def discover_asg_backends() -> list[str]:
         "ec2",
         "describe-instances",
         "--region",
-        AWS_REGION,
+        region,
         "--instance-ids",
         *instance_ids,
         "--query",
@@ -183,10 +218,14 @@ def is_healthy(backend: str) -> bool:
 def discovery_loop() -> None:
     while True:
         backends = static_backends()
-        try:
-            backends.extend(discover_asg_backends())
-        except Exception as exc:
-            print(f"ASG discovery failed: {exc}", flush=True)
+        for region, asg_name in asg_targets():
+            try:
+                backends.extend(discover_asg_backends(region, asg_name))
+            except Exception as exc:
+                print(
+                    f"ASG discovery failed for {region}:{asg_name}: {exc}",
+                    flush=True,
+                )
 
         healthy = [backend for backend in sorted(set(backends)) if is_healthy(backend)]
         STATE.replace(backends, healthy)
@@ -227,9 +266,19 @@ def sticky_key(headers, body: bytes) -> str | None:
     return None
 
 
+def vllm_priority(headers) -> int:
+    """Read the trusted caller's priority and keep it in a bounded range."""
+    raw_priority = headers.get(VLLM_PRIORITY_HEADER)
+    if raw_priority is None:
+        return DEFAULT_VLLM_PRIORITY
+    try:
+        priority = int(raw_priority)
+    except ValueError:
+        return DEFAULT_VLLM_PRIORITY
+    return min(MAX_VLLM_PRIORITY, max(MIN_VLLM_PRIORITY, priority))
+
+
 def apply_request_defaults(path: str, headers, body: bytes) -> bytes:
-    if not DEFAULT_CHAT_TEMPLATE_THINKING and not DEFAULT_REQUEST_PARAMS:
-        return body
     if not body or "/chat/completions" not in path:
         return body
 
@@ -255,7 +304,54 @@ def apply_request_defaults(path: str, headers, body: bytes) -> bytes:
 
     for key, value in DEFAULT_REQUEST_PARAMS.items():
         payload.setdefault(key, value)
+    payload["priority"] = vllm_priority(headers)
+    for key in ("max_tokens", "max_completion_tokens"):
+        value = payload.get(key)
+        if (
+            MAX_REQUEST_OUTPUT_TOKENS is not None
+            and isinstance(value, int)
+            and value > MAX_REQUEST_OUTPUT_TOKENS
+        ):
+            payload[key] = MAX_REQUEST_OUTPUT_TOKENS
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def normalize_content_parts_for_vllm(path: str, headers, body: bytes) -> bytes:
+    """Translate OpenAI reasoning content parts to the vLLM-compatible shape."""
+    if not body or "/chat/completions" not in path:
+        return body
+    if "application/json" not in headers.get("content-type", "").lower():
+        return body
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body
+    if not isinstance(payload, dict):
+        return body
+    changed = False
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "reasoning":
+                    part["type"] = "thinking"
+                    changed = True
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8") if changed else body
+
+
+def router_capabilities() -> dict[str, int | str]:
+    return {
+        "model": MODEL_ID,
+        "max_context_tokens": MODEL_MAX_CONTEXT_TOKENS,
+        "working_context_tokens": MODEL_WORKING_CONTEXT_TOKENS,
+        "max_output_tokens": MODEL_MAX_OUTPUT_TOKENS,
+    }
 
 
 class RouterHandler(BaseHTTPRequestHandler):
@@ -281,6 +377,9 @@ class RouterHandler(BaseHTTPRequestHandler):
             backends, healthy = STATE.snapshot()
             self.send_json(200, {"backends": backends, "healthy": healthy})
             return
+        if self.path == "/router/capabilities":
+            self.send_json(200, router_capabilities())
+            return
         self.proxy()
 
     def do_POST(self) -> None:
@@ -293,6 +392,7 @@ class RouterHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("content-length") or 0)
         body = self.rfile.read(content_length) if content_length else b""
         body = apply_request_defaults(self.path, self.headers, body)
+        body = normalize_content_parts_for_vllm(self.path, self.headers, body)
 
         if ROUTER_API_KEY:
             expected = f"Bearer {ROUTER_API_KEY}"
@@ -314,6 +414,7 @@ class RouterHandler(BaseHTTPRequestHandler):
             for key, value in self.headers.items()
             if key.lower() not in HOP_BY_HOP_HEADERS
             and key.lower() not in {"host", "content-length"}
+            and key.lower() != VLLM_PRIORITY_HEADER
         }
         headers["host"] = parsed.netloc
         if body:
