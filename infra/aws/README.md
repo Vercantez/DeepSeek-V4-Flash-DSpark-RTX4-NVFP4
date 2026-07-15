@@ -74,31 +74,19 @@ limit. `MAX_REQUEST_OUTPUT_TOKENS` is an optional operational guardrail, not a
 default policy. This keeps request routing deterministic and makes vLLM the
 authority for hard context validation.
 
-## Fast Startup Notes
+## Worker Startup
 
-The working model cache is about 156 GB. Keep it on persistent EBS or inside the
-AMI. Do not rely on `/opt/dlami/nvme`; it is instance-store NVMe and disappears
-after Spot termination.
+The active startup path uses a versioned, regional S3 artifact rather than a
+model EBS snapshot. The artifact contains the dereferenced model snapshot,
+vLLM compile cache, FlashInfer cache, and a SHA-256 manifest. Worker user data
+downloads it to `/opt/dlami/nvme/deepseek-model`, validates the manifest, then
+points `HF_CACHE` at that local NVMe path before starting vLLM.
 
-For fastest restarts:
-
-1. Bake the Docker image, repo, and systemd service into a runtime AMI.
-2. Keep the Hugging Face model cache on a separate snapshot-backed EBS volume
-   mounted at `/opt/deepseek-cache`.
-3. Set `VolumeInitializationRate: 300` on the cache-volume mapping. This gives
-   snapshot hydration a predictable path without the continuous cost of Fast
-   Snapshot Restore or a blocking manual cache sweep.
-4. Use an ASG launch template with Spot market options and multiple subnets.
-5. Keep the router on a small on-demand instance so GPU evictions do not remove
-   the public API entrypoint.
-
-### S3 To NVMe Model Staging
-
-For production Spot recovery, prefer a versioned, regional S3 artifact over a
-snapshot-backed model EBS volume. The artifact contains the dereferenced model
-snapshot, vLLM compile cache, FlashInfer cache, and a SHA-256 manifest. Worker
-user data downloads it to `/opt/dlami/nvme/deepseek-model`, validates the
-manifest, then points `HF_CACHE` at that NVMe path before starting vLLM.
+The local NVMe cache is intentionally ephemeral: it is discarded on Spot
+termination and rebuilt from S3. Bake the Docker image, repository, and
+systemd unit into the runtime AMI; keep the model artifact immutable and
+regional. This removes EBS snapshot hydration and Fast Snapshot Restore from
+the recovery path.
 
 `worker-user-data-s3-nvme.sh` requires `MODEL_ARTIFACT_URI` to be set to an
 immutable release prefix, such as:
@@ -107,20 +95,16 @@ immutable release prefix, such as:
 s3://deepseek-rtx4-artifacts-<account>-us-east-2/deepseek-v4-flash-dspark/<release>
 ```
 
-`worker-user-data-mount-cache.sh` is the worker launch user-data entrypoint for
-the split-cache setup. It waits for a volume labeled `deepseek-cache`, mounts it,
-then starts `deepseek-rtx4.service`.
-### Oregon multi-region worker pool
-
-The Oregon launch helper requires the worker SSM instance profile so a new Spot
-replacement remains privately manageable. It also mounts the copied warm cache
-and enables the vLLM service to recover after a reboot.
+Use `promote-s3-nvme-launch-template.sh` to create a new launch-template
+version. It embeds `worker-user-data-s3-nvme.sh`, removes the obsolete cache
+volume mapping, and promotes the new version:
 
 ```bash
-AMI_ID=ami-... \
-CACHE_SNAPSHOT_ID=snap-... \
-SECURITY_GROUP_ID=sg-... \
-SUBNET_IDS=subnet-...,subnet-... \
-INSTANCE_PROFILE_ARN=arn:aws:iam::<account>:instance-profile/deepseek-rtx4-worker-management-profile \
-./create-oregon-spot-asg.sh
+REGION=us-east-2 \
+LAUNCH_TEMPLATE_ID=lt-... \
+MODEL_ARTIFACT_URI=s3://deepseek-rtx4-artifacts-<account>-us-east-2/deepseek-v4-flash-dspark/<release> \
+./promote-s3-nvme-launch-template.sh
 ```
+
+See `OPERATIONS.md` for the service topology, readiness contract, and recovery
+checks.
