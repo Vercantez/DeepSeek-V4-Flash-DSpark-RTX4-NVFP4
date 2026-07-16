@@ -59,12 +59,13 @@ The service default is `MAX_NUM_SEQS=64`, `MAX_NUM_BATCHED_TOKENS=8192`,
 a reproducible benchmark. A prior `12288` token prefetch canary regressed from
 the 8192 baseline and was not adopted.
 
-KV tiered offload remains an opt-in experimental setting in the launch script.
-An isolated `g7e.24xlarge` canary successfully initialized DSpark with a 256
-GiB CPU tier and local-NVMe secondary tier, then passed an OpenAI-compatible
-smoke request. It is not enabled for serving workers yet because this does not
-establish its latency impact or prove spill-and-reload behavior under real
-long-context pressure. Promote it only after a dedicated saturation benchmark.
+New S3/NVMe worker templates enable tiered KV offload by default: a 256 GiB
+host-memory primary tier plus local-NVMe secondary tier. The isolated
+`g7e.24xlarge` canary initialized DSpark, created both tiers, and passed an
+OpenAI-compatible smoke request. This increases retained cache capacity for
+long-context sessions, but a miss that reaches a lower tier has higher latency;
+keep it out of short-latency benchmarks unless the workload actually spills.
+Existing workers retain their current configuration until replacement.
 
 ## Recovery and verification
 

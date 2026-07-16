@@ -73,10 +73,11 @@ printf '%s\n' \
   "HF_CACHE=$HF_CACHE" \
   "MODEL_DIR=/cache/huggingface/$model_dir_rel" >>"$env_file"
 
-# Tiered KV offload is opt-in until the current vLLM runtime completes engine
-# initialization reliably with the large CPU and filesystem tiers enabled.
-if [ -n "${KV_OFFLOAD_GB:-}" ]; then
-  : "${KV_OFFLOAD_DISK_DIR:?Set KV_OFFLOAD_DISK_DIR when KV_OFFLOAD_GB is set}"
+# Give new RTX4 workers a durable overflow tier for long-context sessions. The
+# primary offload tier is host memory; local NVMe is used after it fills.
+: "${KV_OFFLOAD_GB:=256}"
+: "${KV_OFFLOAD_DISK_DIR:=/opt/dlami/nvme/kv-offload}"
+if [ "$KV_OFFLOAD_GB" -gt 0 ]; then
   printf '%s\n' \
     "KV_OFFLOAD_GB=$KV_OFFLOAD_GB" \
     "KV_OFFLOAD_DISK_DIR=$KV_OFFLOAD_DISK_DIR" >>"$env_file"
