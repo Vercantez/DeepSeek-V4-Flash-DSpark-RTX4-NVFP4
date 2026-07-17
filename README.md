@@ -4,7 +4,7 @@
 
 This fork includes an experimental x86 RTX PRO 6000 Blackwell port for serving
 `deepseek-ai/DeepSeek-V4-Flash-DSpark` with DSpark speculative decoding and the
-`nvfp4_ds_mla` KV-cache path on an AWS `g7e.24xlarge` host.
+supported `fp8_ds_mla` KV-cache path on an AWS `g7e.24xlarge` host.
 
 The DGX Spark runtime image from the original recipe is ARM64 and does not run
 directly on the AWS x86 RTX host. The RTX path therefore builds a small patch
@@ -24,7 +24,7 @@ Validated AWS profile:
 - tensor parallelism: `4`
 - attention backend: `FLASHINFER_MLA_SPARSE_DSV4`
 - backend profile: `lucifer-cutlass`
-- KV cache dtype: `nvfp4_ds_mla`
+- KV cache dtype: `fp8_ds_mla`
 - speculative decoding: DSpark, `num_speculative_tokens=5`
 - `max_model_len=262144`
 - `max_num_seqs=64`
@@ -40,7 +40,9 @@ was around `48` concurrent streams: `3268.7 tok/s` aggregate with about
 
 The RTX patch is still experimental. It has passed boot, smoke, and concurrency
 benchmarks, but it needs longer correctness and latency soak testing before use
-as a production service baseline.
+as a production service baseline. Its DSpark and NVFP4-weight support remains
+custom; the AWS profile uses the upstream DeepSeek FP8 MLA KV layout rather than
+the unvalidated `nvfp4_ds_mla` KV probe.
 
 ## DGX Spark C12 NVFP4 KV
 

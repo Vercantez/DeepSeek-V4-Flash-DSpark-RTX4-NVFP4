@@ -68,10 +68,11 @@ sudo -u ubuntu git -C "$repo" fetch --all --prune
 sudo -u ubuntu git -C "$repo" checkout main
 sudo -u ubuntu git -C "$repo" pull --ff-only
 
-sed -i '/^HF_CACHE=/d; /^MODEL_DIR=/d; /^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
+sed -i '/^HF_CACHE=/d; /^MODEL_DIR=/d; /^KV_CACHE_DTYPE=/d; /^KV_OFFLOAD_GB=/d; /^KV_OFFLOAD_DISK_DIR=/d' "$env_file"
 printf '%s\n' \
   "HF_CACHE=$HF_CACHE" \
-  "MODEL_DIR=/cache/huggingface/$model_dir_rel" >>"$env_file"
+  "MODEL_DIR=/cache/huggingface/$model_dir_rel" \
+  "KV_CACHE_DTYPE=fp8_ds_mla" >>"$env_file"
 
 # Give new RTX4 workers a durable overflow tier for long-context sessions. The
 # primary offload tier is host memory; local NVMe is used after it fills.

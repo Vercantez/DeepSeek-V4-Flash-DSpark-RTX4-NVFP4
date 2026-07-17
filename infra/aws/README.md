@@ -8,7 +8,7 @@ This directory contains the prototype deployment shape for serving
 - GPU workers run in an Auto Scaling Group with Spot capacity.
 - Each GPU worker starts `deepseek-rtx4.service`, which runs the tested
   `vllm-dspark-runtime:rtx4-nvfp4-port-v3` container with:
-  - `KV_CACHE_DTYPE=nvfp4_ds_mla`
+  - `KV_CACHE_DTYPE=fp8_ds_mla`
   - DSpark speculative decoding enabled
   - `MAX_NUM_SEQS=64`
   - `MAX_NUM_BATCHED_TOKENS=8192`

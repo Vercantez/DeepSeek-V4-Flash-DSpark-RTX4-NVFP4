@@ -6,7 +6,7 @@ account IDs, private addresses, API keys, or S3 release names in this file.
 ## Topology
 
 - `g7e.24xlarge` workers serve DeepSeek V4 Flash DSpark with four RTX PRO 6000
-  Blackwell GPUs, TP=4, NVFP4 MLA KV cache, and DSpark speculative decoding.
+  Blackwell GPUs, TP=4, FP8 MLA KV cache, and DSpark speculative decoding.
 - Worker Auto Scaling Groups are maintained in Ohio (`us-east-2`), Oregon
   (`us-west-2`), and Virginia (`us-east-1`). Workers use Spot capacity by
   default. Any temporary on-demand base capacity must be explicitly removed

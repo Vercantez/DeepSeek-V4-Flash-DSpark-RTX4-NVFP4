@@ -21,7 +21,7 @@ fi
 : "${GPUS:=0,1,2,3}"
 : "${TP_SIZE:=4}"
 : "${BACKEND:=lucifer-cutlass}"
-: "${KV_CACHE_DTYPE:=nvfp4_ds_mla}"
+: "${KV_CACHE_DTYPE:=fp8_ds_mla}"
 : "${MAX_MODEL_LEN:=262144}"
 : "${MAX_NUM_SEQS:=64}"
 : "${MAX_NUM_BATCHED_TOKENS:=8192}"
